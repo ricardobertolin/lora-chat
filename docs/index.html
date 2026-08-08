@@ -415,6 +415,19 @@
     border: 1px solid var(--line-dim);
   }
   button.swatch:hover { border-color: var(--ink); }
+  .btnlink {
+    display: inline-flex;
+    align-items: center;
+    padding: 0 10px;
+    min-height: 32px;
+    border: 1px solid var(--line-dim);
+    color: var(--ink);
+    font-size: 11px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    text-decoration: none;
+  }
+  .btnlink:hover { background: var(--ink); color: #000; }
 
   select {
     font-family: var(--ming);
@@ -568,7 +581,7 @@
 
 <header>
   <div class="title">
-    <span>LoRa Chat <i id="ver">v0.15.0</i></span>
+    <span>LoRa Chat <i id="ver">v0.16.0</i></span>
     <small id="sub">not connected</small>
   </div>
   <div class="spacer"></div>
@@ -732,6 +745,7 @@
   </div>
   <div class="prow">
     <button id="diag" class="ghost sm">USB diagnostics</button>
+    <a class="ghost sm btnlink" href="manual.html" target="_blank" rel="noopener">Manual</a>
   </div>
 </div>
 

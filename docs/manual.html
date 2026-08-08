@@ -1,0 +1,863 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LoRa Chat - Field Reference Manual</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg?v=2">
+<style>
+  @font-face {
+    font-family: 'DotGothic16';
+    src: url('vendor/dotgothic16-latin.woff2') format('woff2');
+    font-weight: 400; font-style: normal; font-display: swap;
+  }
+
+  :root {
+    --bg: #000000;
+    --panel: #0b0c0b;
+    --line: #ffffff;
+    --line-dim: #4a4d48;
+    --ink: #eef0ea;
+    --ink-dim: #8d918a;
+    --acid: #d8ff2f;
+    --red: #ff2d2d;
+    --ming: 'MingLiU','PMingLiU','MS Song','SimSun','MS Gothic','DotGothic16',monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 24px 12px 60px;
+    background: #050505;
+    color: var(--ink);
+    font: 13px/1.55 var(--ming);
+  }
+
+  /* ===== sheet ===== */
+  .page {
+    position: relative;
+    width: 100%;
+    max-width: 840px;
+    min-height: 1090px;
+    margin: 0 auto 26px;
+    padding: 46px 52px 64px;
+    background: var(--bg);
+    border: 1px solid var(--line-dim);
+  }
+
+  /* ===== masthead ===== */
+  .mast {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    border-bottom: 3px solid var(--line);
+    padding-bottom: 6px;
+    margin-bottom: 26px;
+  }
+  .mast .doc { font-size: 11px; letter-spacing: 3px; text-transform: uppercase; color: var(--ink-dim); }
+  .brand {
+    font-size: 21px;
+    letter-spacing: 7px;
+    text-transform: uppercase;
+    color: var(--ink);
+  }
+  .brand b { color: var(--acid); font-weight: normal; }
+
+  /* ===== footer ===== */
+  .foot {
+    position: absolute;
+    left: 52px; right: 52px; bottom: 30px;
+    display: flex;
+    justify-content: space-between;
+    border-top: 1px solid var(--line);
+    padding-top: 5px;
+    font-size: 10px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+  }
+
+  /* ===== headings ===== */
+  h1 {
+    margin: 0 0 2px;
+    font-size: 30px;
+    letter-spacing: 5px;
+    text-transform: uppercase;
+    font-weight: normal;
+  }
+  h1 + .sub {
+    margin: 0 0 22px;
+    font-size: 14px;
+    letter-spacing: 5px;
+    text-transform: uppercase;
+    color: var(--acid);
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 10px;
+  }
+  h2 {
+    margin: 26px 0 10px;
+    font-size: 15px;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    font-weight: normal;
+  }
+  h2::before {
+    content: "";
+    display: inline-block;
+    width: 10px; height: 10px;
+    margin-right: 10px;
+    background: var(--acid);
+  }
+  h3 {
+    margin: 18px 0 6px;
+    font-size: 12px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--acid);
+    font-weight: normal;
+  }
+  p { margin: 0 0 9px; text-align: justify; }
+
+  /* ===== black header bars, as on a datasheet ===== */
+  .cols { display: flex; gap: 22px; margin: 18px 0; }
+  .col { flex: 1; min-width: 0; }
+  .bar {
+    background: var(--ink);
+    color: #000;
+    text-align: center;
+    font-size: 11px;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    padding: 3px 0;
+    margin-bottom: 9px;
+  }
+  ul { margin: 0 0 9px; padding-left: 18px; }
+  li { margin-bottom: 3px; }
+
+  /* ===== tables ===== */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 10px 0 14px;
+    font-size: 12px;
+  }
+  th, td {
+    border: 1px solid var(--line-dim);
+    padding: 4px 8px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th {
+    background: var(--panel);
+    color: var(--acid);
+    font-weight: normal;
+    font-size: 11px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    text-align: center;
+  }
+  td.c { text-align: center; }
+  td.n { text-align: right; font-variant-numeric: tabular-nums; }
+  code, .mono { font-family: var(--ming); color: var(--acid); }
+  td code { color: var(--acid); }
+
+  .note-box {
+    border-left: 3px solid var(--acid);
+    padding: 7px 12px;
+    margin: 12px 0;
+    background: var(--panel);
+    font-size: 12px;
+  }
+  .note-box.warn { border-left-color: var(--red); }
+  .note-box b { color: var(--acid); font-weight: normal; letter-spacing: 2px; }
+  .note-box.warn b { color: var(--red); }
+
+  pre {
+    margin: 10px 0;
+    padding: 10px 12px;
+    background: var(--panel);
+    border: 1px solid var(--line-dim);
+    font-size: 12px;
+    overflow-x: auto;
+    color: var(--ink);
+  }
+
+  /* ===== cover ===== */
+  .cover { display: flex; flex-direction: column; }
+  .cover .title { font-size: 46px; letter-spacing: 12px; text-transform: uppercase; line-height: 1.1; }
+  .cover .kind { margin-top: 6px; font-size: 15px; letter-spacing: 6px; text-transform: uppercase; color: var(--acid); }
+  .cover .rule { border-bottom: 3px solid var(--line); margin: 22px 0 0; }
+  .steps {
+    flex: 1;
+    margin-top: 40px;
+    min-height: 480px;
+    background:
+      repeating-linear-gradient(90deg, var(--acid) 0 6px, transparent 6px 22px);
+    -webkit-mask-image:
+      linear-gradient(to bottom, transparent 0 8%, #000 8% 15%, transparent 15% 26%, #000 26% 38%,
+      transparent 38% 47%, #000 47% 61%, transparent 61% 70%, #000 70% 82%, transparent 82% 90%, #000 90% 100%);
+    mask-image:
+      linear-gradient(to bottom, transparent 0 8%, #000 8% 15%, transparent 15% 26%, #000 26% 38%,
+      transparent 38% 47%, #000 47% 61%, transparent 61% 70%, #000 70% 82%, transparent 82% 90%, #000 90% 100%);
+    opacity: .85;
+  }
+  .cover .issue { margin-top: 26px; font-size: 11px; letter-spacing: 3px; text-transform: uppercase; color: var(--ink-dim); text-align: right; }
+
+  /* ===== contents ===== */
+  .toc { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .toc td { border: 0; padding: 5px 0; }
+  .toc td:first-child { color: var(--acid); width: 46px; }
+  .toc td:last-child { text-align: right; color: var(--ink-dim); width: 60px; }
+  .toc a { color: var(--ink); text-decoration: none; letter-spacing: 2px; text-transform: uppercase; }
+  .toc a:hover { color: var(--acid); }
+  .toc tr td { border-bottom: 1px dotted var(--line-dim); }
+
+  .diagram {
+    border: 1px solid var(--line-dim);
+    padding: 14px;
+    margin: 12px 0;
+    background: var(--panel);
+    font-size: 12px;
+    white-space: pre;
+    overflow-x: auto;
+    color: var(--ink);
+    line-height: 1.35;
+  }
+
+  /* ===== print: invert to a real datasheet ===== */
+  @media print {
+    @page { size: A4 portrait; margin: 14mm; }
+    :root {
+      --bg: #ffffff; --panel: #f2f2f2; --line: #000000; --line-dim: #808080;
+      --ink: #000000; --ink-dim: #555555; --acid: #000000; --red: #000000;
+    }
+    body { background: #fff; padding: 0; font-size: 10.5pt; }
+    .page {
+      border: 0; margin: 0; padding: 0 0 12mm; min-height: 0; max-width: none;
+      page-break-after: always;
+    }
+    .page:last-child { page-break-after: auto; }
+    .foot { position: static; margin-top: 14mm; }
+    h2::before { background: #000; }
+    th { background: #000; color: #fff; }
+    .bar { background: #000; color: #fff; }
+    .steps { background: repeating-linear-gradient(90deg, #000 0 6px, transparent 6px 22px); }
+    .toc a, a { color: #000; }
+    pre, .diagram { background: #f6f6f6; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ============================ COVER ============================ -->
+<section class="page cover">
+  <div>
+    <div class="title">LoRa<br>Chat</div>
+    <div class="kind">Field Reference Manual</div>
+    <div class="rule"></div>
+  </div>
+  <div class="steps"></div>
+  <div class="issue">
+    Document LRC-TD-0001 &nbsp;|&nbsp; Issue for firmware lora_chat / application v0.16.0<br>
+    Heltec WiFi LoRa 32 (V3) &nbsp;|&nbsp; ESP32-S3 + SX1262
+  </div>
+</section>
+
+<!-- ============================ CONTENTS ============================ -->
+<section class="page">
+  <div class="mast"><div class="brand">LoRa<b>Chat</b></div><div class="doc">Contents</div></div>
+  <h1>Contents</h1>
+  <div class="sub">Read section 1 first</div>
+
+  <table class="toc">
+    <tr><td>1</td><td><a href="#s1">System Overview</a></td><td>3</td></tr>
+    <tr><td>2</td><td><a href="#s2">Hardware Datasheet</a></td><td>4</td></tr>
+    <tr><td>3</td><td><a href="#s3">Firmware Reference</a></td><td>5</td></tr>
+    <tr><td>4</td><td><a href="#s4">Radio Configuration</a></td><td>6</td></tr>
+    <tr><td>5</td><td><a href="#s5">Wire Protocol</a></td><td>7</td></tr>
+    <tr><td>6</td><td><a href="#s6">Application Interface</a></td><td>8</td></tr>
+    <tr><td>7</td><td><a href="#s7">Link Measurement</a></td><td>9</td></tr>
+    <tr><td>8</td><td><a href="#s8">Media Transfer</a></td><td>10</td></tr>
+    <tr><td>9</td><td><a href="#s9">Security</a></td><td>11</td></tr>
+    <tr><td>10</td><td><a href="#s10">Supplemental Data</a></td><td>12</td></tr>
+    <tr><td>11</td><td><a href="#s11">Fault Diagnosis</a></td><td>13</td></tr>
+  </table>
+
+  <div class="note-box">
+    <b>NOTE:</b> Values printed in this manual are the shipping defaults. Anything
+    the operator changes at runtime is reported by the board itself; consult
+    <code>/status</code> rather than this document when they disagree.
+  </div>
+
+  <div class="foot"><span>LRC-TD-0001</span><span>2 of 13</span></div>
+</section>
+
+<!-- ============================ 1. OVERVIEW ============================ -->
+<section class="page" id="s1">
+  <div class="mast"><div class="brand">LoRa<b>Chat</b></div><div class="doc">Section 1</div></div>
+  <h1>System Overview</h1>
+  <div class="sub">Two radios, two devices, no infrastructure</div>
+
+  <div class="cols">
+    <div class="col">
+      <div class="bar">Description</div>
+      <p>LoRa Chat is a point-to-point messaging system built from two Heltec
+      WiFi LoRa 32 (V3) boards. Each board is a dumb radio pipe: it carries
+      newline-delimited text and reports what it hears. All protocol, encryption,
+      positioning and measurement live in a browser application.</p>
+      <p>The consequence is that most changes require no reflashing. Position
+      sharing, encryption, media transfer and delivery receipts were all added
+      without touching the firmware.</p>
+    </div>
+    <div class="col">
+      <div class="bar">Features</div>
+      <ul>
+        <li>Text messaging with delivery receipts</li>
+        <li>AES-256-GCM encryption, passphrase derived</li>
+        <li>Position sharing and a north-up radar</li>
+        <li>Link measurement: delivery ratio and margin</li>
+        <li>Image and audio transfer</li>
+        <li>Radio settings changed at runtime, with rollback</li>
+        <li>Runs offline as an installed web application</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2>Signal Path</h2>
+  <div class="diagram">  [ browser ]                                     [ browser ]
+       |                                               |
+   USB serial                                      USB serial
+       |                                               |
+  [ ESP32-S3 ]                                    [ ESP32-S3 ]
+       |                                               |
+   SPI @ 8MHz                                      SPI @ 8MHz
+       |                                               |
+  [ SX1262 ] ))) - - - - LoRa 915 MHz - - - - ((( [ SX1262 ]
+                        1.25 kbit/s at SF9</div>
+
+  <p>The link carries 1.25 kbit/s at the default settings. Every feature in this
+  manual is constrained by that figure; where a feature costs meaningful airtime
+  it is stated in the relevant section.</p>
+
+  <div class="note-box warn">
+    <b>IMPORTANT:</b> The radio measures nothing about distance. The SX1262 has no
+    ranging engine. All distances reported by the application are computed from
+    shared GPS coordinates and transmitted as ordinary messages.
+  </div>
+
+  <div class="foot"><span>LRC-TD-0001</span><span>3 of 13</span></div>
+</section>
+
+<!-- ============================ 2. HARDWARE ============================ -->
+<section class="page" id="s2">
+  <div class="mast"><div class="brand">LoRa<b>Chat</b></div><div class="doc">Section 2</div></div>
+  <h1>Heltec WiFi LoRa 32</h1>
+  <div class="sub">V3 &nbsp;/&nbsp; ESP32-S3FN8 + SX1262</div>
+
+  <div class="cols">
+    <div class="col">
+      <div class="bar">Description</div>
+      <p>Dual-core ESP32-S3 with 8 MB embedded flash, an SX1262 sub-GHz
+      transceiver, a 128x64 SSD1306 display and a CP2102 USB bridge. The 863-928
+      MHz variant covers both EU868 and AU915 plans.</p>
+    </div>
+    <div class="col">
+      <div class="bar">Features</div>
+      <ul>
+        <li>ESP32-S3, 240 MHz, Wi-Fi and BT 5 (LE)</li>
+        <li>SX1262, up to +22 dBm</li>
+        <li>SSD1306 OLED, 128x64</li>
+        <li>LiPo connector with charging</li>
+        <li>CP2102 USB-to-UART, VID 10C4 PID EA60</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2>Pin Configuration</h2>
+  <table>
+    <tr><th>Signal</th><th>GPIO</th><th>Function</th></tr>
+    <tr><td><code>NSS</code></td><td class="c">8</td><td>SX1262 chip select</td></tr>
+    <tr><td><code>SCK</code></td><td class="c">9</td><td>SPI clock</td></tr>
+    <tr><td><code>MOSI</code></td><td class="c">10</td><td>SPI data out</td></tr>
+    <tr><td><code>MISO</code></td><td class="c">11</td><td>SPI data in</td></tr>
+    <tr><td><code>RST</code></td><td class="c">12</td><td>SX1262 reset</td></tr>
+    <tr><td><code>BUSY</code></td><td class="c">13</td><td>SX1262 busy</td></tr>
+    <tr><td><code>DIO1</code></td><td class="c">14</td><td>Interrupt. See note below.</td></tr>
+    <tr><td><code>SDA</code></td><td class="c">17</td><td>OLED I2C data</td></tr>
+    <tr><td><code>SCL</code></td><td class="c">18</td><td>OLED I2C clock</td></tr>
+    <tr><td><code>RST_OLED</code></td><td class="c">21</td><td>OLED reset</td></tr>
+    <tr><td><code>LED</code></td><td class="c">35</td><td>User LED</td></tr>
+    <tr><td><code>Vext</code></td><td class="c">36</td><td>OLED power switch, active LOW</td></tr>
+  </table>
+
+  <div class="note-box warn">
+    <b>ERRATA:</b> The board variant header names the SX1262 interrupt pin
+    <code>DIO0</code>, carried over from the SX127x used on the V2. It is
+    <code>DIO1</code>. Code written against the label rather than the part will
+    not receive interrupts.
+  </div>
+
+  <h2>Required Initialisation</h2>
+  <table>
+    <tr><th>Item</th><th>Value</th><th>Consequence if omitted</th></tr>
+    <tr><td>TCXO voltage</td><td class="c">1.8 V</td><td><code>begin()</code> fails with a timeout</td></tr>
+    <tr><td>DIO2 as RF switch</td><td class="c">enabled</td><td>Transmits report success; almost nothing radiates</td></tr>
+    <tr><td>Regulator</td><td class="c">DC-DC</td><td>Higher current draw</td></tr>
+    <tr><td>Vext before I2C</td><td class="c">LOW</td><td>Display stays dark, no device at 0x3C</td></tr>
+  </table>
+
+  <p>Free GPIO for expansion: 2-7, 41, 42, 47, 48. Avoid 0, 45 and 46, which are
+  strapping pins and affect boot. GPIO 1 and 37 are believed to be the battery
+  divider and its enable; confirm against the schematic before use.</p>
+
+  <div class="foot"><span>LRC-TD-0001</span><span>4 of 13</span></div>
+</section>
+
+<!-- ============================ 3. FIRMWARE ============================ -->
+<section class="page" id="s3">
+  <div class="mast"><div class="brand">LoRa<b>Chat</b></div><div class="doc">Section 3</div></div>
+  <h1>Firmware Reference</h1>
+  <div class="sub">lora_chat.ino &nbsp;/&nbsp; 115200 8N1</div>
+
+  <p>The firmware exchanges lines of text over USB serial. A line typed in is
+  transmitted; a line received is printed with its signal figures. Everything
+  else is the application's business.</p>
+
+  <h2>Serial Output Format</h2>
+  <table>
+    <tr><th>Prefix</th><th>Meaning</th><th>Example</th></tr>
+    <tr><td><code>===</code></td><td>Boot banner, carries the node name</td><td><code>=== LoRa chat - this board is "8424" ===</code></td></tr>
+    <tr><td><code>&gt;&gt;</code></td><td>Transmitted. Printed once on air.</td><td><code>&gt;&gt; hello</code></td></tr>
+    <tr><td><code>&lt;&lt;</code></td><td>Received, with RSSI and SNR</td><td><code>&lt;&lt; 3D2C: hi (RSSI -44.0 dBm, SNR 11.2 dB)</code></td></tr>
+    <tr><td><code>~~</code></td><td>Status or settings report</td><td><code>~~ now on 915.000 MHz, SF10, ...</code></td></tr>
+    <tr><td><code>!!</code></td><td>Error</td><td><code>!! invalid setting, ignored</code></td></tr>
+  </table>
+
+  <div class="note-box">
+    <b>NOTE:</b> The <code>&gt;&gt;</code> echo is printed only after the packet is
+    actually on the air. The application uses it as flow control when sending
+    fragments; a fixed delay would overrun the 256-byte serial buffer.
+  </div>
+
+  <h2>Line Limits</h2>
+  <table>
+    <tr><th>Limit</th><th>Value</th><th>Notes</th></tr>
+    <tr><td>Serial input line</td><td class="n">200 chars</td><td>Overflow is transmitted as a second packet</td></tr>
+    <tr><td>Application line budget</td><td class="n">180 chars</td><td>Leaves margin under the above</td></tr>
+    <tr><td>Node name prefix</td><td class="n">6 chars</td><td>Added by the firmware before transmission</td></tr>
+    <tr><td>SX1262 packet</td><td class="n">255 bytes</td><td>Hard limit of the part</td></tr>
+  </table>
+
+  <div class="note-box warn">
+    <b>IMPORTANT:</b> A line over 200 characters is split silently. Encrypted, the
+    ciphertext is cut and neither half authenticates, and the receiver reports a
+    passphrase mismatch. The application fragments anything longer rather than
+    submitting it; see Section 8.
+  </div>
+
+  <h2>Node Naming</h2>
+  <p>Each board names itself from the last two bytes of its MAC address, giving
+  a four-character hexadecimal identifier such as <code>8424</code>. The name is
+  prefixed to every transmission. Operator-facing nicknames are an application
+  concern and do not change this identifier.</p>
+
+  <div class="foot"><span>LRC-TD-0001</span><span>5 of 13</span></div>
+</section>
+
+<!-- ============================ 4. RADIO ============================ -->
+<section class="page" id="s4">
+  <div class="mast"><div class="brand">LoRa<b>Chat</b></div><div class="doc">Section 4</div></div>
+  <h1>Radio Configuration</h1>
+  <div class="sub">Changed at runtime, applied at both ends</div>
+
+  <h2>Shipping Defaults</h2>
+  <table>
+    <tr><th>Parameter</th><th>Default</th><th>Range</th></tr>
+    <tr><td>Frequency</td><td class="c">915.0 MHz</td><td class="c">150 - 960</td></tr>
+    <tr><td>Spreading factor</td><td class="c">9</td><td class="c">7 - 12</td></tr>
+    <tr><td>Bandwidth</td><td class="c">125 kHz</td><td class="c">7.8 - 500</td></tr>
+    <tr><td>Coding rate</td><td class="c">4/7</td><td class="c">fixed</td></tr>
+    <tr><td>Transmit power</td><td class="c">14 dBm</td><td class="c">-9 - 22</td></tr>
+    <tr><td>Sync word</td><td class="c">0x12</td><td class="c">fixed, private</td></tr>
+    <tr><td>Preamble</td><td class="c">8 symbols</td><td class="c">fixed</td></tr>
+  </table>
+
+  <h2>Commands</h2>
+  <p>Typed into the message field. Handled by the board and never transmitted as
+  conversation.</p>
+  <table>
+    <tr><th>Command</th><th>Effect</th></tr>
+    <tr><td><code>/status</code></td><td>Report current settings, node name and packet counts</td></tr>
+    <tr><td><code>/sf 7..12</code></td><td>Spreading factor. Higher reaches further, slower.</td></tr>
+    <tr><td><code>/freq 868.0</code></td><td>Frequency in MHz</td></tr>
+    <tr><td><code>/bw 125</code></td><td>Bandwidth in kHz. Only the steps the SX1262 supports.</td></tr>
+    <tr><td><code>/power -9..22</code></td><td>Transmit power in dBm</td></tr>
+    <tr><td><code>/revert</code></td><td>Undo the last change immediately</td></tr>
+    <tr><td><code>/help</code></td><td>List the above</td></tr>
+  </table>
+
+  <h2>Change Sequence</h2>
+  <p>Both ends must agree on every parameter, so a change is never applied
+  alone:</p>
+  <ol>
+    <li>The new settings are broadcast <b>on the old ones</b>, while the other
+    board can still hear.</li>
+    <li>Both ends apply them and each arms a 30-second rollback.</li>
+    <li>Each transmits a probe after a randomised 300-1200 ms delay. Receiving
+    anything confirms the change and disarms the rollback.</li>
+    <li>If nothing arrives within 30 seconds the previous settings are restored
+    automatically.</li>
+  </ol>
+
+  <div class="note-box">
+    <b>NOTE:</b> The probe delay is randomised because two boards switching at the
+    same instant would otherwise transmit over each other, both hear silence, and
+    both roll back a change that was sound.
+  </div>
+
+  <div class="note-box warn">
+    <b>CAUTION:</b> Regional limits are the operator's responsibility. 915 MHz suits
+    Brazil and AU915 plans; use 868.0 where EU868 applies.
+  </div>
+
+  <div class="foot"><span>LRC-TD-0001</span><span>6 of 13</span></div>
+</section>
+
+<!-- ============================ 5. WIRE PROTOCOL ============================ -->
+<section class="page" id="s5">
+  <div class="mast"><div class="brand">LoRa<b>Chat</b></div><div class="doc">Section 5</div></div>
+  <h1>Wire Protocol</h1>
+  <div class="sub">Application messages carried as text</div>
+
+  <p>All application traffic is ordinary text with a marker prefix. The firmware
+  neither generates nor interprets any of it except <code>!CFG</code>.</p>
+
+  <h2>Message Types</h2>
+  <table>
+    <tr><th>Form</th><th>Direction</th><th>Purpose</th></tr>
+    <tr><td><code>!M&lt;seq&gt; text</code></td><td class="c">both</td><td>Chat message with sequence number</td></tr>
+    <tr><td><code>!ACK &lt;name&gt; &lt;seq&gt;</code></td><td class="c">both</td><td>Receipt, naming the original sender</td></tr>
+    <tr><td><code>!HI [nick]</code></td><td class="c">both</td><td>Presence announcement, every 120 s</td></tr>
+    <tr><td><code>!BYE</code></td><td class="c">both</td><td>Leaving the channel</td></tr>
+    <tr><td><code>!POS lat lon acc</code></td><td class="c">both</td><td>Position, six decimal places</td></tr>
+    <tr><td><code>!PING &lt;seq&gt;</code></td><td class="c">both</td><td>Link test probe</td></tr>
+    <tr><td><code>!PONG &lt;seq&gt;</code></td><td class="c">both</td><td>Probe reply, sent automatically</td></tr>
+    <tr><td><code>!CALL</code></td><td class="c">both</td><td>Ring the other end, repeats every 4 s</td></tr>
+    <tr><td><code>!CALLOK</code></td><td class="c">both</td><td>Answered</td></tr>
+    <tr><td><code>!CALLNO</code></td><td class="c">both</td><td>Declined. Stops the caller repeating.</td></tr>
+    <tr><td><code>!ENC &lt;base64&gt;</code></td><td class="c">both</td><td>Encrypted payload wrapper</td></tr>
+    <tr><td><code>!B&lt;id&gt;.&lt;seq&gt;.&lt;n&gt;.&lt;k&gt;&lt;e&gt;</code></td><td class="c">both</td><td>Transfer fragment</td></tr>
+    <tr><td><code>!BE&lt;id&gt;</code></td><td class="c">both</td><td>End of transfer</td></tr>
+    <tr><td><code>!BR&lt;id&gt; 3,7,12</code></td><td class="c">both</td><td>Resend request</td></tr>
+    <tr><td><code>!CFG SF n FREQ f ...</code></td><td class="c">both</td><td>Radio change. Generated by the firmware.</td></tr>
+    <tr><td><code>!CFGOK</code></td><td class="c">both</td><td>Post-change probe</td></tr>
+  </table>
+
+  <div class="note-box">
+    <b>NOTE:</b> Acknowledgements name the <b>original sender</b> rather than the
+    acknowledger. On a broadcast channel an unaddressed receipt becomes ambiguous
+    the moment a third node joins.
+  </div>
+
+  <h2>Fragment Header</h2>
+  <table>
+    <tr><th>Field</th><th>Width</th><th>Meaning</th></tr>
+    <tr><td><code>id</code></td><td class="c">3</td><td>Transfer identifier, base36</td></tr>
+    <tr><td><code>seq</code></td><td class="c">1-3</td><td>Fragment index, from zero</td></tr>
+    <tr><td><code>n</code></td><td class="c">1-3</td><td>Total fragments</td></tr>
+    <tr><td><code>k</code></td><td class="c">1</td><td><code>i</code> image, <code>a</code> audio, <code>t</code> text</td></tr>
+    <tr><td><code>e</code></td><td class="c">1</td><td><code>1</code> if the blob is encrypted</td></tr>
+  </table>
+
+  <div class="foot"><span>LRC-TD-0001</span><span>7 of 13</span></div>
+</section>
+
+<!-- ============================ 6. INTERFACE ============================ -->
+<section class="page" id="s6">
+  <div class="mast"><div class="brand">LoRa<b>Chat</b></div><div class="doc">Section 6</div></div>
+  <h1>Application Interface</h1>
+  <div class="sub">Panels and indicators</div>
+
+  <h2>Header</h2>
+  <table>
+    <tr><th>Control</th><th>Function</th></tr>
+    <tr><td><code>Pos</code></td><td>Position source, peer roster and radar</td></tr>
+    <tr><td><code>Test</code></td><td>Link measurement and CSV export</td></tr>
+    <tr><td><code>Call</code></td><td>Ring the other end. Confirms first.</td></tr>
+    <tr><td><code>Med</code></td><td>Send an image or audio</td></tr>
+    <tr><td><code>Set</code></td><td>Nickname, outbox, channel, encryption, sound, history, accent</td></tr>
+    <tr><td><code>Connect</code></td><td>Attach a board. Opens the browser device picker.</td></tr>
+  </table>
+
+  <h2>Message Status</h2>
+  <table>
+    <tr><th>Marking</th><th>Meaning</th></tr>
+    <tr><td><code>sending</code></td><td>Handed to the board</td></tr>
+    <tr><td><code>sent</code></td><td>Confirmed on air by the board</td></tr>
+    <tr><td><code>delivered</code></td><td>The other end acknowledged it</td></tr>
+    <tr><td><code>no ack</code></td><td>Nothing came back within the window</td></tr>
+    <tr><td><code>failed</code></td><td>The board would not accept it</td></tr>
+    <tr><td><code>enc</code></td><td>Encrypted in transit</td></tr>
+  </table>
+
+  <h2>Presence</h2>
+  <p>Raw LoRa has no association step; anyone on the same frequency and sync word
+  hears everything. Presence is therefore inferred. Any traffic counts as a sign
+  of life. Five minutes of silence marks a node <b>quiet</b>; it is greyed rather
+  than removed, because on this link a node that has left and one that is behind
+  a hill look identical.</p>
+
+  <h2>Outbox</h2>
+  <p>Messages typed while disconnected, or unacknowledged after their window, are
+  held and sent once a board is attached. Capacity is 50; past that the oldest is
+  dropped rather than refusing new ones. The composer remains usable with no
+  board present.</p>
+
+  <div class="foot"><span>LRC-TD-0001</span><span>8 of 13</span></div>
+</section>
+
+<!-- ============================ 7. MEASUREMENT ============================ -->
+<section class="page" id="s7">
+  <div class="mast"><div class="brand">LoRa<b>Chat</b></div><div class="doc">Section 7</div></div>
+  <h1>Link Measurement</h1>
+  <div class="sub">Margin, not signal strength</div>
+
+  <div class="note-box warn">
+    <b>IMPORTANT:</b> Received signal strength is a misleading measure of link
+    health. It is observed only for packets that arrived, so at the edge of range
+    the weak ones vanish and the average improves. A link appears healthiest
+    immediately before it fails.
+  </div>
+
+  <p>LoRa demodulates below the noise floor, so signal-to-noise ratio against the
+  spreading factor's limit predicts success far better. <b>Margin</b> is the
+  headline figure:</p>
+
+  <pre>margin = SNR - floor(SF)
+range multiplier = 10 ^ (margin / (10 * n))
+  where n is the path-loss exponent:
+  2 free space, 3 suburban, 4-6 dense urban</pre>
+
+  <h2>Demodulation Floors</h2>
+  <table>
+    <tr><th>SF</th><th>SNR floor</th><th>Sensitivity at 125 kHz</th><th>Airtime, 20 B</th></tr>
+    <tr><td class="c">7</td><td class="n">-7.5 dB</td><td class="n">-123 dBm</td><td class="n">0.06 s</td></tr>
+    <tr><td class="c">8</td><td class="n">-10.0 dB</td><td class="n">-126 dBm</td><td class="n">0.11 s</td></tr>
+    <tr><td class="c">9</td><td class="n">-12.5 dB</td><td class="n">-129 dBm</td><td class="n">0.23 s</td></tr>
+    <tr><td class="c">10</td><td class="n">-15.0 dB</td><td class="n">-132 dBm</td><td class="n">0.41 s</td></tr>
+    <tr><td class="c">11</td><td class="n">-17.5 dB</td><td class="n">-134.5 dBm</td><td class="n">0.82 s</td></tr>
+    <tr><td class="c">12</td><td class="n">-20.0 dB</td><td class="n">-137 dBm</td><td class="n">1.6 s</td></tr>
+  </table>
+
+  <h2>Measurement Procedure</h2>
+  <p>The following invalidate a measurement if ignored:</p>
+  <ul>
+    <li><b>Antenna orientation.</b> Both vertical. Cross-polarisation can cost 20
+    dB, more than the entire SF7 to SF12 range.</li>
+    <li><b>Height.</b> Waist or above. Ground proximity obstructs the Fresnel
+    zone; on the pavement is easily 10 dB down.</li>
+    <li><b>Body position.</b> 900 MHz is absorbed by the operator. Keep posture
+    consistent between readings.</li>
+    <li><b>Sample count.</b> Twenty probes minimum per point. Fading makes a
+    single sample meaningless.</li>
+    <li><b>Fixed power.</b> Set it explicitly, or readings are not comparable.</li>
+  </ul>
+
+  <p>Delivery ratio excludes probes still within their timeout. Counting them as
+  lost would make the figure dip after every transmission.</p>
+
+  <div class="foot"><span>LRC-TD-0001</span><span>9 of 13</span></div>
+</section>
+
+<!-- ============================ 8. MEDIA ============================ -->
+<section class="page" id="s8">
+  <div class="mast"><div class="brand">LoRa<b>Chat</b></div><div class="doc">Section 8</div></div>
+  <h1>Media Transfer</h1>
+  <div class="sub">Fragmentation, dithering, ADPCM</div>
+
+  <h2>Encoding</h2>
+  <table>
+    <tr><th>Type</th><th>Encoding</th><th>Size</th><th>At SF9</th></tr>
+    <tr><td>Image 128x64</td><td>1-bit Floyd-Steinberg</td><td class="n">1 kB</td><td class="n">~15 s</td></tr>
+    <tr><td>Image 192x144</td><td>1-bit Floyd-Steinberg</td><td class="n">3.4 kB</td><td class="n">~50 s</td></tr>
+    <tr><td>Audio 4 kHz</td><td>4-bit IMA ADPCM</td><td class="n">2 kB/s</td><td class="n">~30 s per second</td></tr>
+    <tr><td>Long text</td><td>UTF-8, fragmented</td><td class="n">as typed</td><td class="n">proportional</td></tr>
+  </table>
+
+  <p>Dithering rather than a threshold: at one bit a threshold destroys every
+  gradient in the image. The sender is shown the dithered result before it is
+  transmitted.</p>
+
+  <h2>Transfer Sequence</h2>
+  <ol>
+    <li>The blob is encrypted <b>once</b> as a whole, not per fragment.</li>
+    <li>It is base64 encoded and split into fragments of at most 180 characters.</li>
+    <li>Fragments are transmitted one at a time, paced by the board's echo.</li>
+    <li><code>!BE</code> marks the end. The receiver requests anything missing.</li>
+    <li>Three resend rounds, then the transfer is abandoned.</li>
+  </ol>
+
+  <div class="note-box">
+    <b>NOTE:</b> Per-fragment encryption would add 28 bytes plus base64 expansion to
+    every line and roughly halve throughput. The cost of encrypting once is that
+    fragment headers travel in the clear - sequence numbers and a one-letter
+    type, no more than the node name already reveals.
+  </div>
+
+  <div class="note-box warn">
+    <b>CAUTION:</b> A transfer occupies the channel for its full duration. Nothing
+    else can be sent. Reduce the spreading factor with <code>/sf 7</code> before
+    sending media; it is roughly four times faster than SF9.
+  </div>
+
+  <h2>Audio Limitations</h2>
+  <p>ADPCM is not a speech codec. It is fixed at four bits per sample, so 4 kHz
+  audio costs 2 kB per second, roughly thirty times slower than real time at SF9.
+  A vocoder such as Codec2, running at 700-1600 bit/s, would be five to twenty
+  times smaller and is the correct solution.</p>
+
+  <div class="foot"><span>LRC-TD-0001</span><span>10 of 13</span></div>
+</section>
+
+<!-- ============================ 9. SECURITY ============================ -->
+<section class="page" id="s9">
+  <div class="mast"><div class="brand">LoRa<b>Chat</b></div><div class="doc">Section 9</div></div>
+  <h1>Security</h1>
+  <div class="sub">Scope and limitations</div>
+
+  <h2>Cipher</h2>
+  <table>
+    <tr><th>Property</th><th>Value</th></tr>
+    <tr><td>Algorithm</td><td>AES-256-GCM</td></tr>
+    <tr><td>Key derivation</td><td>PBKDF2-SHA256, 200 000 iterations</td></tr>
+    <tr><td>Initialisation vector</td><td>96-bit, fresh per message</td></tr>
+    <tr><td>Authentication</td><td>128-bit GCM tag</td></tr>
+    <tr><td>Wire overhead</td><td>28 bytes, then base64 expansion</td></tr>
+  </table>
+
+  <p>A wrong key, a tampered packet or a truncated one fails to decrypt rather
+  than producing plausible output.</p>
+
+  <div class="note-box warn">
+    <b>LIMITATIONS:</b> The salt is fixed. Both ends must derive the same key having
+    exchanged nothing beforehand, which rules out a per-conversation salt, so the
+    passphrase alone determines the key. Identical passphrases produce identical
+    keys. The iteration count and passphrase strength carry the security.
+  </div>
+
+  <p>The following are <b>not</b> concealed: the node name, which the firmware
+  prefixes outside the ciphertext; message timing and length; and the fact that a
+  transmission occurred. Traffic analysis remains possible.</p>
+
+  <p>The passphrase is stored in the browser so the application survives a
+  reload. This protects against interception on the air, not against physical
+  access to an unlocked device.</p>
+
+  <h2>Channel Sharing</h2>
+  <p>A QR code and link carry frequency, spreading factor, bandwidth, power and
+  passphrase. The payload rides in the URL fragment, which browsers never
+  transmit to a server, and is removed from the address bar once applied.</p>
+
+  <div class="note-box warn">
+    <b>CAUTION:</b> Anyone who photographs the code joins the channel and reads
+    everything on it. Treat it as the password it contains.
+  </div>
+
+  <div class="foot"><span>LRC-TD-0001</span><span>11 of 13</span></div>
+</section>
+
+<!-- ============================ 10. SUPPLEMENTAL ============================ -->
+<section class="page" id="s10">
+  <div class="mast"><div class="brand">LoRa<b>Chat</b></div><div class="doc">Section 10</div></div>
+  <h1>Supplemental Data</h1>
+  <div class="sub">Constants and derived figures</div>
+
+  <h2>Application Constants</h2>
+  <table>
+    <tr><th>Constant</th><th>Value</th><th>Applies to</th></tr>
+    <tr><td>Presence announce</td><td class="n">120 s</td><td>Interval between <code>!HI</code></td></tr>
+    <tr><td>Presence timeout</td><td class="n">5 min</td><td>Silence before a node is marked quiet</td></tr>
+    <tr><td>Acknowledgement window</td><td class="n">25 s</td><td>Extended by transfer time for long messages</td></tr>
+    <tr><td>Position interval</td><td class="n">60 s</td><td>When sharing is enabled</td></tr>
+    <tr><td>Position accuracy gate</td><td class="n">100 m</td><td>Fixes worse than this are refused</td></tr>
+    <tr><td>Call repeat</td><td class="n">4 s</td><td>Until answered or declined</td></tr>
+    <tr><td>Decline quiet period</td><td class="n">60 s</td><td>After dismissing a call</td></tr>
+    <tr><td>Outbox capacity</td><td class="n">50</td><td>Oldest dropped first</td></tr>
+    <tr><td>History capacity</td><td class="n">300</td><td>Messages retained</td></tr>
+    <tr><td>Resend rounds</td><td class="n">3</td><td>Before abandoning a transfer</td></tr>
+  </table>
+
+  <h2>Positioning</h2>
+  <p>Satellite positioning requires no internet connection. Network assistance
+  only shortens time to first fix: one to five seconds with assistance, up to
+  several minutes on a cold start without it. Obtain a fix before leaving
+  coverage; cached orbital data remains valid for some hours.</p>
+
+  <table>
+    <tr><th>Condition</th><th>Typical accuracy</th></tr>
+    <tr><td>Open sky</td><td class="n">3 - 10 m</td></tr>
+    <tr><td>Dual-frequency receiver, open sky</td><td class="n">1 - 3 m</td></tr>
+    <tr><td>Urban, tree cover</td><td class="n">10 - 50 m</td></tr>
+    <tr><td>Indoors</td><td>Unusable</td></tr>
+  </table>
+
+  <p>Errors at each end combine in quadrature, so a computed separation carries
+  roughly 7 m of uncertainty regardless of distance. At the ranges this equipment
+  operates over, that is negligible.</p>
+
+  <div class="note-box">
+    <b>NOTE:</b> A desktop computer has no satellite receiver. Its position is
+    entered manually and is therefore exact, and it does not move. This is the
+    preferable arrangement: all positional uncertainty sits at the end that is
+    actually moving.
+  </div>
+
+  <div class="foot"><span>LRC-TD-0001</span><span>12 of 13</span></div>
+</section>
+
+<!-- ============================ 11. FAULTS ============================ -->
+<section class="page" id="s11">
+  <div class="mast"><div class="brand">LoRa<b>Chat</b></div><div class="doc">Section 11</div></div>
+  <h1>Fault Diagnosis</h1>
+  <div class="sub">Symptoms and causes</div>
+
+  <table>
+    <tr><th>Symptom</th><th>Probable cause</th></tr>
+    <tr><td>Board powers on, no device in the picker</td><td>Charge-only cable. Power and data are separate; the CP2102 needs D+/D-.</td></tr>
+    <tr><td>No device, desktop</td><td>Another program holds the port. Close the serial monitor.</td></tr>
+    <tr><td>Connects, no banner</td><td>The board did not reset. Press RST.</td></tr>
+    <tr><td>Garbled characters</td><td>Baud rate. The board is 115200.</td></tr>
+    <tr><td>Web Serial and WebUSB unavailable</td><td>Firefox or Safari. Neither implements either API.</td></tr>
+    <tr><td>Messages send, nothing arrives</td><td>The boards disagree on frequency, spreading factor or bandwidth.</td></tr>
+    <tr><td>Decryption fails on every message</td><td>Different passphrase. Verify with a shared channel code.</td></tr>
+    <tr><td>Position refused</td><td>Fix worse than 100 m. On Android, confirm the browser has Precise location rather than Approximate.</td></tr>
+    <tr><td>Display dark, nothing at 0x3C</td><td>Vext not driven LOW before initialising I2C.</td></tr>
+    <tr><td>Radio settings revert after 30 s</td><td>Working as designed. The other end did not confirm; verify both boards run the same firmware.</td></tr>
+    <tr><td>Phone shows an older version</td><td>The installed copy has not updated. Reload once.</td></tr>
+  </table>
+
+  <h2>Diagnostic Output</h2>
+  <p>Set &gt; USB diagnostics reports the application version, the transport in
+  use, whether each browser interface exists, whether the context is secure, and
+  offers a device picker accepting any USB device. If that picker is also empty,
+  the browser can see no USB device at all and the fault is the cable or host
+  mode, not the application.</p>
+
+  <div class="note-box">
+    <b>NOTE:</b> Both ends must run the same application version for newer message
+    types to be understood. The version is printed beside the title.
+  </div>
+
+  <div class="foot"><span>LRC-TD-0001</span><span>13 of 13</span></div>
+</section>
+
+<script type="module">
+  // Follow the accent the operator chose in the application.
+  import { readAccent } from './theme.js';
+  import { VERSION } from './version.js';
+  document.documentElement.style.setProperty('--acid', readAccent());
+  for (const el of document.querySelectorAll('.issue')) {
+    el.innerHTML = el.innerHTML.replace('v0.16.0', 'v' + VERSION);
+  }
+</script>
+</body>
+</html>
