@@ -30,6 +30,8 @@ rewritten in JavaScript.
 | `protocol.js` | Parses the firmware's serial lines. No browser APIs, so it is unit-testable. |
 | `transport.js` | Web Serial and WebUSB/CP210x implementations behind one interface. |
 | `position.js` | Position encoding and great-circle maths. Also browser-free and unit-tested. |
+| `crypto.js` | AES-GCM encryption and passphrase key derivation. |
+| `history.js` | Chat history persistence and capping. |
 | `sw.js`, `manifest.webmanifest` | PWA shell, so it installs and runs offline. |
 | `serve.py` | Local dev server on localhost. |
 | `make_icons.py` | Regenerates the PNG icons. Stdlib only. |
@@ -63,6 +65,44 @@ quietly becoming a map pin.
 
 **Share** starts a 60-second broadcast. At SF9 a position costs about a third of
 a second of airtime, so it stays negligible for a handful of nodes.
+
+## Encryption
+
+**Set** -> type a shared passphrase -> **Enable**, on both ends. Messages then go
+out as:
+
+```
+!ENC <base64 of IV || AES-256-GCM ciphertext || tag>
+```
+
+The board relays that like any other text, so the **firmware needs no changes**.
+GCM authenticates as well as encrypts: a wrong key, a tampered packet or a
+truncated one fails to decrypt rather than producing plausible garbage.
+Decrypted messages show a lock in the header.
+
+What it does **not** hide: the sender name, which the firmware prefixes outside
+the ciphertext, and the fact that a transmission happened.
+
+Two honest caveats:
+
+- **Fixed salt.** Both ends must derive the same key having exchanged nothing,
+  which rules out a random per-conversation salt. So the passphrase alone
+  determines the key - identical passphrases give identical keys. 200k PBKDF2
+  iterations and a strong passphrase are what carry the security.
+- **The passphrase is stored in `localStorage`** so it survives reloads. Anyone
+  with the unlocked device can read it. This protects against listening on the
+  air, not against someone holding your phone.
+
+Airtime roughly doubles: 28 bytes of IV and tag plus base64's 4/3 expansion, so
+a 40-character message goes from about 0.35 s to 0.7 s at SF9.
+
+`/commands` are never encrypted - the board would not recognise them.
+
+## History
+
+The last 300 messages are kept in `localStorage` and replayed on load, below an
+`--- earlier ---` divider. **Set -> Clear** wipes them. Only real messages are
+stored; diagnostics, positions and radio chatter are not.
 
 ## Radio commands
 
@@ -148,8 +188,10 @@ from the PC - and a USB-C OTG adapter if it is USB-A on the other end.
 Working on hardware: **Web Serial** on Windows desktop and **WebUSB** on
 Android, both chatting through a Heltec V3.
 
-Unit-tested (`npm test`, 26 tests): the serial line parser against output
-captured from real sessions, and the position encoding and great-circle maths.
+Unit-tested (`npm test`, 50 tests): the serial line parser against output
+captured from real sessions, position encoding and great-circle maths,
+encryption against Node's WebCrypto (round-trip, wrong key, tampering,
+truncation, unicode), and history capping and corrupt-storage handling.
 
 Not covered by tests: the two transports and the DOM, which need a real browser
 and real hardware.

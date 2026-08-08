@@ -10,6 +10,8 @@ import {
   formatAge,
   MAX_ACCURACY_M,
 } from './position.js';
+import { deriveKey, encryptMessage, decryptMessage, isEncrypted } from './crypto.js';
+import * as history from './history.js';
 import {
   pickTransport,
   describeCapabilities,
@@ -42,6 +44,14 @@ const els = {
   shareBtn: document.getElementById('shareBtn'),
   posClear: document.getElementById('posClear'),
   peers: document.getElementById('peers'),
+  setBtn: document.getElementById('setBtn'),
+  setPanel: document.getElementById('setPanel'),
+  passIn: document.getElementById('passIn'),
+  encOn: document.getElementById('encOn'),
+  encOff: document.getElementById('encOff'),
+  encState: document.getElementById('encState'),
+  histState: document.getElementById('histState'),
+  histClear: document.getElementById('histClear'),
 };
 
 let transport = null;
@@ -58,6 +68,16 @@ let myPos = null;      // { lat, lon, accuracy, source }
 let watchId = null;
 let shareTimer = null;
 const peers = new Map();  // node name -> { lat, lon, accuracy, at, rssi }
+
+// Encryption --------------------------------------------------------------
+// The passphrase is kept in localStorage so the app is usable across reloads.
+// That means anyone with the unlocked device can read it - the threat this
+// protects against is someone listening on the air, not someone holding
+// your phone.
+const PASS_KEY = 'lora-chat-passphrase';
+let cryptoKey = null;
+
+let log = [];  // persisted chat history
 
 function setConnected(on) {
   els.status.classList.toggle('on', on);
@@ -95,11 +115,11 @@ function note(text, isError = false) {
   append(d);
 }
 
-function bubble({ mine, who, text, rssi, snr }) {
+function bubble({ mine, who, text, rssi, snr, locked, at, persist = true }) {
   const wrap = document.createElement('div');
   wrap.className = 'msg ' + (mine ? 'sent' : 'recv');
 
-  if (who || rssi !== undefined) {
+  if (who || rssi !== undefined || locked) {
     const meta = document.createElement('div');
     meta.className = 'meta';
     if (who) {
@@ -107,6 +127,13 @@ function bubble({ mine, who, text, rssi, snr }) {
       w.className = 'who';
       w.textContent = who;
       meta.appendChild(w);
+    }
+    if (locked) {
+      const l = document.createElement('span');
+      l.className = 'lock';
+      l.textContent = '🔒';
+      l.title = 'encrypted in transit';
+      meta.appendChild(l);
     }
     if (rssi !== undefined && rssi !== null) {
       const s = document.createElement('span');
@@ -121,6 +148,51 @@ function bubble({ mine, who, text, rssi, snr }) {
   body.textContent = text;
   wrap.appendChild(body);
   append(wrap);
+
+  if (persist) {
+    log = history.appendEntry(log, {
+      mine,
+      who: who || null,
+      text,
+      rssi: rssi ?? null,
+      snr: snr ?? null,
+      locked: !!locked,
+      at: at ?? Date.now(),
+    });
+    history.save(log);
+    renderHistoryState();
+  }
+}
+
+function renderHistoryState() {
+  els.histState.textContent = log.length
+    ? `${log.length} message${log.length === 1 ? '' : 's'} kept`
+    : 'empty';
+}
+
+// Replays the stored conversation on load. persist:false so redrawing does not
+// append the same messages again.
+function restoreHistory() {
+  log = history.load();
+  renderHistoryState();
+  if (!log.length) return;
+
+  for (const e of log) {
+    bubble({
+      mine: e.mine,
+      who: e.who,
+      text: e.text,
+      rssi: e.rssi ?? undefined,
+      snr: e.snr ?? undefined,
+      locked: e.locked,
+      persist: false,
+    });
+  }
+  const d = document.createElement('div');
+  d.className = 'note';
+  d.textContent = `--- earlier (${history.formatStamp(log[log.length - 1].at)}) ---`;
+  els.log.appendChild(d);
+  els.log.scrollTop = els.log.scrollHeight;
 }
 
 function handleLine(raw) {
@@ -131,6 +203,13 @@ function handleLine(raw) {
     case 'sent':
       if (isPosition(ev.text)) {
         note(`sent position (${myPos ? myPos.source : 'unknown'})`);
+      } else if (isEncrypted(ev.text)) {
+        // Show what we actually sent, not the ciphertext the board echoed.
+        decryptMessage(cryptoKey, ev.text).then((plain) =>
+          plain === null
+            ? note('sent an encrypted message')
+            : bubble({ mine: true, text: plain, locked: true })
+        );
       } else {
         bubble({ mine: true, text: ev.text });
       }
@@ -146,6 +225,27 @@ function handleLine(raw) {
       }
       if (ev.text.startsWith('!CFG ')) {
         note(`${ev.from || 'peer'} changed the radio: ${ev.text.slice(5)}`);
+        break;
+      }
+
+      if (isEncrypted(ev.text)) {
+        const who = ev.from || 'peer';
+        if (!cryptoKey) {
+          note(`${who} sent an encrypted message - set the passphrase to read it`);
+          break;
+        }
+        decryptMessage(cryptoKey, ev.text).then((plain) =>
+          plain === null
+            ? note(`could not decrypt a message from ${who} - different passphrase?`, true)
+            : bubble({
+                mine: false,
+                who: ev.from,
+                text: plain,
+                rssi: ev.rssi,
+                snr: ev.snr,
+                locked: true,
+              })
+        );
         break;
       }
 
@@ -292,6 +392,50 @@ function toggleShare() {
   renderPosition();
 }
 
+// Encryption and history controls ----------------------------------------
+
+function renderEncState() {
+  els.encState.textContent = cryptoKey ? 'on (AES-256-GCM)' : 'off - messages are readable on air';
+}
+
+async function enableEncryption(passphrase, quiet = false) {
+  try {
+    cryptoKey = await deriveKey(passphrase);
+    localStorage.setItem(PASS_KEY, passphrase);
+    if (!quiet) note('encryption on - the other end needs the same passphrase');
+  } catch (err) {
+    cryptoKey = null;
+    if (!quiet) note(`could not set passphrase: ${err.message}`, true);
+  }
+  renderEncState();
+}
+
+els.encOn.addEventListener('click', () => {
+  const p = els.passIn.value;
+  if (!p) {
+    note('enter a passphrase first', true);
+    return;
+  }
+  els.passIn.value = '';
+  enableEncryption(p);
+});
+
+els.encOff.addEventListener('click', () => {
+  cryptoKey = null;
+  localStorage.removeItem(PASS_KEY);
+  renderEncState();
+  note('encryption off');
+});
+
+els.histClear.addEventListener('click', () => {
+  history.clear();
+  log = [];
+  els.log.textContent = '';
+  renderHistoryState();
+  note('history cleared');
+});
+
+els.setBtn.addEventListener('click', () => els.setPanel.classList.toggle('show'));
 els.posBtn.addEventListener('click', () => els.posPanel.classList.toggle('show'));
 els.useGps.addEventListener('click', startGps);
 els.manualBtn.addEventListener('click', () => {
@@ -399,9 +543,13 @@ els.form.addEventListener('submit', async (e) => {
   if (!text || !transport) return;
   els.input.value = '';
   try {
+    // Commands are for the board itself and must not be encrypted, or it would
+    // never recognise them.
+    const outgoing =
+      cryptoKey && !text.startsWith('/') ? await encryptMessage(cryptoKey, text) : text;
     // No local echo: the board echoes every accepted line back as ">> ...", so
     // what appears in the log is what actually went out over the air.
-    await transport.send(text);
+    await transport.send(outgoing);
   } catch (err) {
     note(`send failed: ${err && err.message ? err.message : err}`, true);
   }
@@ -463,3 +611,9 @@ if ('serviceWorker' in navigator) {
 
 setConnected(false);
 renderPosition();
+renderEncState();
+restoreHistory();
+
+// A stored passphrase means encryption stays on across reloads.
+const storedPass = localStorage.getItem(PASS_KEY);
+if (storedPass) enableEncryption(storedPass, true);

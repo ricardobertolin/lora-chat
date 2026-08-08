@@ -49,7 +49,8 @@
   header {
     display: flex;
     align-items: center;
-    gap: 10px;
+    flex-wrap: wrap;
+    gap: 8px;
     padding: 10px 14px;
     background: var(--panel);
     border-bottom: 1px solid var(--line);
@@ -195,7 +196,7 @@
   }
   #banner.show { display: block; }
 
-  #posPanel {
+  #posPanel, #setPanel {
     display: none;
     flex-direction: column;
     gap: 8px;
@@ -205,7 +206,19 @@
     font-size: 13px;
     flex: 0 0 auto;
   }
-  #posPanel.show { display: flex; }
+  #posPanel.show, #setPanel.show { display: flex; }
+  .prow input[type=password] {
+    flex: 1 1 140px;
+    font: inherit;
+    font-size: 16px;
+    padding: 7px 10px;
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    color: var(--text);
+    min-width: 0;
+  }
+  .lock { font-size: 11px; }
   .prow {
     display: flex;
     align-items: center;
@@ -246,9 +259,31 @@
   <div class="spacer"></div>
   <span class="pill" id="status"><span class="dot"></span><span id="statusText">offline</span></span>
   <button id="posBtn" class="ghost" title="Position sharing">Pos</button>
-  <button id="diag" class="ghost" title="Show what USB devices this browser can see">?</button>
+  <button id="setBtn" class="ghost" title="Encryption, history, diagnostics">Set</button>
   <button id="connect">Connect</button>
 </header>
+
+<div id="setPanel">
+  <div class="prow">
+    <strong>Encryption</strong>
+    <span id="encState" class="muted">off</span>
+  </div>
+  <div class="prow">
+    <input type="password" id="passIn" placeholder="shared passphrase" autocomplete="off">
+    <button id="encOn" class="sm">Enable</button>
+    <button id="encOff" class="ghost sm">Disable</button>
+  </div>
+  <div class="prow muted">Both ends need the same passphrase. Sender names and
+    timing stay visible; only the message text is hidden.</div>
+  <div class="prow">
+    <strong>History</strong>
+    <span id="histState" class="muted"></span>
+    <button id="histClear" class="ghost sm">Clear</button>
+  </div>
+  <div class="prow">
+    <button id="diag" class="ghost sm">USB diagnostics</button>
+  </div>
+</div>
 
 <div id="banner"></div>
 

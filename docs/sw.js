@@ -1,6 +1,6 @@
 // Cache-first app shell, so the page keeps working with no internet once it has
 // been loaded once. Bump CACHE when you change any of the files below.
-const CACHE = 'lora-chat-v4';
+const CACHE = 'lora-chat-v5';
 const SHELL = [
   './',
   'index.html',
@@ -8,6 +8,8 @@ const SHELL = [
   'protocol.js',
   'transport.js',
   'position.js',
+  'crypto.js',
+  'history.js',
   'manifest.webmanifest',
   'icon-192.png',
   'icon-512.png',
