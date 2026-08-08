@@ -1,0 +1,5 @@
+Disables GitHub Pages' Jekyll build for this folder.
+
+Without it, Jekyll renders README.md into the site index and serves that instead
+of index.html, so the app never loads. This is a static app - the files should
+be published exactly as they are.
