@@ -34,6 +34,8 @@ rewritten in JavaScript.
 | `history.js` | Chat history persistence and capping. |
 | `survey.js` | Probe bookkeeping, delivery ratio and link-margin maths. |
 | `audio.js` | Chirps and the ring tone, synthesised with WebAudio - no assets. |
+| `backdrop.js` | The wireframe backdrop. Binds to the UI by observation, so app.js does not know it exists. |
+| `vendor/` | three.js and the display font, held locally so the app runs offline. |
 | `sw.js`, `manifest.webmanifest` | PWA shell, so it installs and runs offline. |
 | `serve.py` | Local dev server on localhost. |
 | `make_icons.py` | Regenerates the PNG icons. Stdlib only. |
@@ -67,6 +69,32 @@ quietly becoming a map pin.
 
 **Share** starts a 60-second broadcast. At SF9 a position costs about a third of
 a second of airtime, so it stays negligible for a handful of nodes.
+
+## Look
+
+The "silvercase" theme: black, acid green `#d8ff2f`, square corners everywhere,
+uppercase letterspaced labels, and a rotating wireframe backdrop that is dormant
+while disconnected, wakes when a board attaches, and fires a shockwave on each
+received packet.
+
+The backdrop reads the UI rather than being driven by it - a `MutationObserver`
+on the status pill and the log - so `app.js` carries no knowledge of it and the
+theme can be swapped by replacing `index.html` and `backdrop.js` alone.
+
+Three departures from the original design, all so it survives the field:
+
+- **three.js is vendored** into `vendor/` instead of imported from a CDN. An
+  offline app cannot fetch its own renderer.
+- **The font is vendored** as a 10 kB Latin subset rather than pulled from
+  Google Fonts. It sits behind the local CJK faces in the stack, so it is what
+  Android actually renders.
+- **The animation stops when the page is hidden.** A WebGL loop running in your
+  pocket while the phone also powers the board is a poor trade on a range walk.
+  `prefers-reduced-motion` gets a single static frame.
+
+`vendor/three.module.min.js` is 670 kB, which dominates the install size. It is
+cached once and never fetched again, but if that matters more than the backdrop,
+delete `backdrop.js` and its `<script>` tag - nothing else references it.
 
 ## Encryption
 
