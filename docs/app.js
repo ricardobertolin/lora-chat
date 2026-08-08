@@ -139,6 +139,16 @@ function handleLine(raw) {
       lastRssi = ev.rssi;
       updateSubtitle();
 
+      // Radio-settings traffic between the boards is status, not conversation.
+      if (ev.text.startsWith('!CFGOK')) {
+        note(`${ev.from || 'peer'} confirmed the new radio settings`);
+        break;
+      }
+      if (ev.text.startsWith('!CFG ')) {
+        note(`${ev.from || 'peer'} changed the radio: ${ev.text.slice(5)}`);
+        break;
+      }
+
       const pos = isPosition(ev.text) ? decodePosition(ev.text) : null;
       if (pos) {
         const who = ev.from || 'unknown';

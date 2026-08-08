@@ -64,6 +64,20 @@ quietly becoming a map pin.
 **Share** starts a 60-second broadcast. At SF9 a position costs about a third of
 a second of airtime, so it stays negligible for a handful of nodes.
 
+## Radio commands
+
+Anything typed starting with `/` is handled by the board instead of being sent:
+
+```
+/status        /sf 7..12      /freq 868.0
+/bw 125        /power -9..22  /revert       /help
+```
+
+Both boards switch together - the change is broadcast on the old settings first,
+then applied at both ends - and **rolls back automatically after 30 seconds if
+nothing is heard**, so a bad setting cannot strand a board out of reach. The app
+shows the boards' `!CFG` chatter as notes rather than chat bubbles.
+
 ## Desktop
 
 ```powershell

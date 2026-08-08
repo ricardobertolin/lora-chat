@@ -132,13 +132,41 @@ Expected output:
 
 ## Radio settings
 
-915 MHz, SF9, BW 125 kHz, CR 4/7, sync word `0x12`, 14 dBm, preamble 8. They
-live at the top of the `.ino`; **both boards must agree on all of them**, so
-change a value and reflash both. 915 MHz suits Brazil/AU915; use 868.0 if you
-are on an EU868 plan. The SX1262 on this board will do up to 22 dBm.
+Defaults are 915 MHz, SF9, BW 125 kHz, CR 4/7, sync word `0x12`, 14 dBm,
+preamble 8, at the top of the `.ino`. 915 MHz suits Brazil/AU915; use 868.0 on
+an EU868 plan. The SX1262 will do up to 22 dBm.
 
-Range vs. speed: raise `LORA_SF` (up to 12) for more range and slower packets,
-lower it (down to 7) for the opposite.
+### Changing them without reflashing
+
+Type a command into the chat - serial monitor, `chat.py`, or the web app. It is
+handled by the board and never goes out as a message:
+
+| Command | Effect |
+| --- | --- |
+| `/status` | Current settings, node name, TX/RX counts |
+| `/sf 7..12` | Spreading factor. Higher reaches further, slower |
+| `/freq 868.0` | Frequency in MHz |
+| `/bw 125` | Bandwidth in kHz (7.8 .. 500, only the SX1262's real steps) |
+| `/power -9..22` | Transmit power in dBm |
+| `/revert` | Undo the last change immediately |
+| `/help` | List the above |
+
+**Both boards must agree on every setting**, so a change is not applied alone:
+
+1. The new settings are broadcast **on the old ones**, while the other board can
+   still hear.
+2. Both ends apply them, and each arms a 30-second rollback.
+3. Each sends a small probe after a random delay, so both have something to
+   hear. Receiving anything confirms the change and disarms the rollback.
+4. If nothing arrives within 30 seconds the settings are **restored
+   automatically** - a change that kills the link undoes itself instead of
+   stranding a board out of reach.
+
+That is why the probe delay is randomised: two boards switching at the same
+moment would otherwise transmit on top of each other and both hear silence.
+
+Range vs. speed: SF12 reaches furthest but a short message takes about 1.6 s of
+airtime versus 0.23 s at SF9.
 
 ## Board notes
 

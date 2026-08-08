@@ -73,6 +73,29 @@ static float lastSnr = 0;
 static uint32_t txCount = 0;
 static uint32_t rxCount = 0;
 
+// Runtime radio settings --------------------------------------------------
+// Changing frequency or spreading factor on one board alone kills the link
+// instantly - you can no longer reach the other board to tell it. So a change
+// is broadcast first, applied by both ends, and rolled back automatically if
+// nothing is heard afterwards.
+struct RadioCfg {
+  float freq;
+  float bw;
+  uint8_t sf;
+  int8_t power;
+};
+
+static RadioCfg cfg = {LORA_FREQ_MHZ, LORA_BW_KHZ, LORA_SF, LORA_POWER_DBM};
+static RadioCfg prevCfg = cfg;
+
+#define REVERT_AFTER_MS 30000
+static uint32_t revertAt = 0;  // 0 = nothing pending
+static uint32_t probeAt = 0;   // 0 = no probe scheduled
+
+// Over-the-air control messages. The app renders these as notes, not chat.
+#define CFG_PREFIX "!CFG "
+#define CFG_PROBE "!CFGOK"
+
 IRAM_ATTR void onDio1Rise() {
   packetWaiting = true;
 }
@@ -102,8 +125,8 @@ static void drawScreen() {
 
   oled.setCursor(0, 0);
   oled.print(nodeName);
-  oled.setCursor(72, 0);
-  oled.printf("%.1f", LORA_FREQ_MHZ);
+  oled.setCursor(54, 0);
+  oled.printf("%.1f/SF%u", cfg.freq, cfg.sf);
   oled.drawFastHLine(0, 10, OLED_W, SSD1306_WHITE);
 
   // Body: the last message, truncated to what fits so it can never push the
@@ -146,12 +169,185 @@ static void halt(const char *what, int code) {
   }
 }
 
+// Bandwidths the SX1262 actually supports, in kHz.
+static const float VALID_BW[] = {7.8, 10.4, 15.6, 20.8, 31.25, 41.7, 62.5, 125.0, 250.0, 500.0};
+
+static bool validCfg(const RadioCfg &c) {
+  if (c.sf < 7 || c.sf > 12) return false;
+  if (c.freq < 150.0 || c.freq > 960.0) return false;
+  if (c.power < -9 || c.power > 22) return false;
+  for (float bw : VALID_BW) {
+    if (fabsf(bw - c.bw) < 0.01f) return true;
+  }
+  return false;
+}
+
+static int applyCfg(const RadioCfg &c) {
+  int state = radio.setFrequency(c.freq);
+  if (state == RADIOLIB_ERR_NONE) state = radio.setBandwidth(c.bw);
+  if (state == RADIOLIB_ERR_NONE) state = radio.setSpreadingFactor(c.sf);
+  if (state == RADIOLIB_ERR_NONE) state = radio.setOutputPower(c.power);
+
+  // The setters drop the radio to standby, so listening has to be restarted.
+  packetWaiting = false;
+  radio.startReceive();
+  return state;
+}
+
+static void printCfg(const char *tag) {
+  Serial.printf("%s %.3f MHz, SF%u, BW %.1f kHz, %d dBm\n", tag, cfg.freq, cfg.sf,
+                cfg.bw, cfg.power);
+}
+
+static void rawSend(const String &payload) {
+  int state = radio.transmit(payload.c_str());
+  if (state != RADIOLIB_ERR_NONE) {
+    Serial.printf("!! send failed, code %d\n", state);
+  }
+  packetWaiting = false;
+  radio.startReceive();
+}
+
+// Arms the rollback and schedules a small probe, so both ends have something to
+// hear. The delay is randomised so two boards switching together do not
+// transmit on top of each other.
+static void armRevert(const RadioCfg &old) {
+  prevCfg = old;
+  revertAt = millis() + REVERT_AFTER_MS;
+  probeAt = millis() + 300 + (esp_random() % 900);
+  Serial.printf("~~ reverting in %lu s unless the link comes back\n",
+                (unsigned long)(REVERT_AFTER_MS / 1000));
+}
+
+static void confirmCfg() {
+  if (revertAt == 0) return;
+  revertAt = 0;
+  printCfg("~~ link confirmed on");
+}
+
+static void rollback() {
+  revertAt = 0;
+  probeAt = 0;
+  RadioCfg broken = cfg;
+  cfg = prevCfg;
+  int state = applyCfg(cfg);
+  Serial.printf("!! nothing heard after the change - rolled back (code %d)\n", state);
+  printCfg("~~ back on");
+  lastMsg = "reverted";
+  lastWasRx = false;
+  drawScreen();
+  (void)broken;
+}
+
+// Applies a change locally and arms the rollback. Used by both the command
+// handler and by an incoming !CFG from the other board.
+static bool changeCfg(const RadioCfg &next, bool announce) {
+  if (!validCfg(next)) {
+    Serial.println("!! invalid setting, ignored");
+    return false;
+  }
+  RadioCfg old = cfg;
+
+  // Announce on the OLD settings, while the other board can still hear us.
+  if (announce) {
+    String msg = String(CFG_PREFIX) + "SF " + next.sf + " FREQ " + String(next.freq, 3) +
+                 " BW " + String(next.bw, 2) + " PWR " + next.power;
+    rawSend(msg);
+  }
+
+  cfg = next;
+  int state = applyCfg(cfg);
+  if (state != RADIOLIB_ERR_NONE) {
+    cfg = old;
+    applyCfg(cfg);
+    Serial.printf("!! could not apply, code %d - unchanged\n", state);
+    return false;
+  }
+  printCfg("~~ now on");
+  armRevert(old);
+  drawScreen();
+  return true;
+}
+
+static bool parseCfgMessage(const String &msg, RadioCfg &out) {
+  out = cfg;
+  int sf, pwr;
+  float freq, bw;
+  if (sscanf(msg.c_str(), CFG_PREFIX "SF %d FREQ %f BW %f PWR %d", &sf, &freq, &bw, &pwr) != 4) {
+    return false;
+  }
+  out.sf = (uint8_t)sf;
+  out.freq = freq;
+  out.bw = bw;
+  out.power = (int8_t)pwr;
+  return validCfg(out);
+}
+
+static void showHelp() {
+  Serial.println("commands:");
+  Serial.println("  /status          show the current radio settings");
+  Serial.println("  /sf 7..12        spreading factor (higher = further, slower)");
+  Serial.println("  /freq 902.5      frequency in MHz");
+  Serial.println("  /bw 125          bandwidth in kHz (7.8 .. 500)");
+  Serial.println("  /power -9..22    transmit power in dBm");
+  Serial.println("  /revert          undo the last change");
+  Serial.println("both boards switch together, and roll back if the link drops");
+}
+
+// Returns true if the line was a command and must not go out over the air.
+static bool handleCommand(const char *line) {
+  if (line[0] != '/') return false;
+
+  char verb[16] = {0};
+  float value = 0;
+  int got = sscanf(line + 1, "%15s %f", verb, &value);
+  if (got < 1) return true;
+
+  if (!strcmp(verb, "help")) {
+    showHelp();
+  } else if (!strcmp(verb, "status")) {
+    printCfg("~~ on");
+    Serial.printf("~~ node %s, TX %lu, RX %lu\n", nodeName, txCount, rxCount);
+  } else if (!strcmp(verb, "revert")) {
+    if (revertAt == 0) {
+      Serial.println("!! nothing to revert");
+    } else {
+      rollback();
+    }
+  } else if (got < 2) {
+    Serial.printf("!! /%s needs a value - try /help\n", verb);
+  } else if (!strcmp(verb, "sf")) {
+    RadioCfg next = cfg;
+    next.sf = (uint8_t)value;
+    changeCfg(next, true);
+  } else if (!strcmp(verb, "freq")) {
+    RadioCfg next = cfg;
+    next.freq = value;
+    changeCfg(next, true);
+  } else if (!strcmp(verb, "bw")) {
+    RadioCfg next = cfg;
+    next.bw = value;
+    changeCfg(next, true);
+  } else if (!strcmp(verb, "power")) {
+    RadioCfg next = cfg;
+    next.power = (int8_t)value;
+    changeCfg(next, true);
+  } else {
+    Serial.printf("!! unknown command /%s - try /help\n", verb);
+  }
+  return true;
+}
+
 static void sendLine() {
   if (inLen == 0) {
     return;
   }
   inBuf[inLen] = '\0';
   inLen = 0;
+
+  if (handleCommand(inBuf)) {
+    return;
+  }
 
   String payload = String(nodeName) + ": " + inBuf;
   int state = radio.transmit(payload.c_str());
@@ -214,6 +410,30 @@ static void pollRadio() {
     rxCount++;
     lastMsg = msg;
     lastWasRx = true;
+
+    // Hearing anything at all proves the settings still work.
+    confirmCfg();
+
+    // The name prefix the sender added sits in front of the marker.
+    int marker = msg.indexOf(CFG_PREFIX);
+    if (marker >= 0) {
+      RadioCfg next;
+      if (parseCfgMessage(msg.substring(marker), next)) {
+        RadioCfg old = cfg;
+        cfg = next;
+        int st = applyCfg(cfg);
+        if (st == RADIOLIB_ERR_NONE) {
+          printCfg("~~ other board switched us to");
+          armRevert(old);
+        } else {
+          cfg = old;
+          applyCfg(cfg);
+          Serial.printf("!! could not follow the change, code %d\n", st);
+        }
+      }
+      drawScreen();
+      return;  // applyCfg already re-armed the receiver
+    }
   } else if (state == RADIOLIB_ERR_CRC_MISMATCH) {
     Serial.println("!! packet dropped, CRC mismatch");
     lastMsg = "CRC mismatch";
@@ -269,11 +489,23 @@ void setup() {
     halt("startReceive()", state);
   }
 
-  Serial.printf("on %.1f MHz, SF%d. Type a message and press Enter.\n",
-                LORA_FREQ_MHZ, LORA_SF);
+  Serial.printf("on %.1f MHz, SF%d. Type a message and press Enter.\n", cfg.freq,
+                cfg.sf);
+  Serial.println("/help lists the radio commands.");
 }
 
 void loop() {
   pollRadio();
   pollSerial();
+
+  // Give the other board something to hear after a settings change.
+  if (probeAt && (int32_t)(millis() - probeAt) >= 0) {
+    probeAt = 0;
+    rawSend(String(nodeName) + ": " + CFG_PROBE);
+  }
+
+  // Nothing came back on the new settings, so they are unusable - go back.
+  if (revertAt && (int32_t)(millis() - revertAt) >= 0) {
+    rollback();
+  }
 }
