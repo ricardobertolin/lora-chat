@@ -14,6 +14,8 @@ import { deriveKey, encryptMessage, decryptMessage, isEncrypted } from './crypto
 import * as history from './history.js';
 import * as survey from './survey.js';
 import * as audio from './audio.js';
+import * as frag from './fragment.js';
+import * as media from './media.js';
 import {
   pickTransport,
   describeCapabilities,
@@ -70,6 +72,16 @@ const els = {
   callText: document.getElementById('callText'),
   answerBtn: document.getElementById('answerBtn'),
   dismissBtn: document.getElementById('dismissBtn'),
+  mediaBtn: document.getElementById('mediaBtn'),
+  mediaPanel: document.getElementById('mediaPanel'),
+  mediaState: document.getElementById('mediaState'),
+  imgBtn: document.getElementById('imgBtn'),
+  imgFile: document.getElementById('imgFile'),
+  audBtn: document.getElementById('audBtn'),
+  audFile: document.getElementById('audFile'),
+  recBtn: document.getElementById('recBtn'),
+  imgWidth: document.getElementById('imgWidth'),
+  audRate: document.getElementById('audRate'),
 };
 
 let transport = null;
@@ -115,6 +127,18 @@ let callTimer = null;      // we are calling out
 let ringingFrom = null;    // someone is calling us
 let ringWatchdog = null;
 let dismissedUntil = 0;
+
+// Media transfer ----------------------------------------------------------
+// Give up on a fragment whose echo never came back, and on an inbound transfer
+// that has gone quiet.
+const FRAG_ECHO_TIMEOUT_MS = 12000;
+const ASSEMBLY_IDLE_MS = 90000;
+const MAX_RESEND_ROUNDS = 3;
+
+let outgoing = null;              // { id, lines, queue, timer, kind }
+const assemblies = new Map();     // id -> assembly
+let recorder = null;
+let recordChunks = [];
 
 function setConnected(on) {
   els.status.classList.toggle('on', on);
@@ -259,6 +283,12 @@ async function handleRecv(ev) {
   let text = ev.text;
   let locked = false;
 
+  // Media fragments carry their own encryption flag for the blob as a whole,
+  // so they are handled before the per-message decryption below.
+  if (text.startsWith(frag.FRAG_PREFIX) && handleFragmentLine(text, who, ev.rssi, ev.snr)) {
+    return;
+  }
+
   // Decrypt before classifying, so positions and probes are protected too.
   if (isEncrypted(text)) {
     if (!cryptoKey) {
@@ -326,6 +356,14 @@ async function handleRecv(ev) {
 async function handleSent(ev) {
   let text = ev.text;
   let locked = false;
+
+  // The echo of a fragment is our flow control: the board only prints it once
+  // the packet is actually on the air, so this is when the next one may go.
+  if (text.startsWith(frag.FRAG_PREFIX)) {
+    if (outgoing) pumpTransfer();
+    return;
+  }
+
   if (isEncrypted(text)) {
     const plain = await decryptMessage(cryptoKey, text);
     if (plain === null) {
@@ -487,6 +525,362 @@ function toggleShare() {
   }
   renderPosition();
 }
+
+// Media transfer ----------------------------------------------------------
+
+// Fragments are sent already-encrypted as a whole blob, so they bypass the
+// per-message encryption in sendText.
+async function sendRaw(line) {
+  if (!transport) throw new Error('not connected');
+  await transport.send(line);
+}
+
+// Paced by the board's own ">>" echo rather than a fixed delay: the firmware
+// transmits synchronously, and dumping 30 lines into a 256-byte serial buffer
+// would simply lose most of them.
+function pumpTransfer() {
+  if (!outgoing) return;
+  clearTimeout(outgoing.timer);
+
+  if (!outgoing.queue.length) {
+    sendRaw(frag.endLine(outgoing.id)).catch(() => {});
+    note(`sent ${outgoing.lines.length} fragments, waiting for the other end`);
+    outgoing.timer = setTimeout(() => endTransfer('transfer finished'), 30000);
+    return;
+  }
+
+  const seq = outgoing.queue.shift();
+  const done = outgoing.lines.length - outgoing.queue.length;
+  els.mediaState.textContent = `sending ${done}/${outgoing.lines.length}`;
+  sendRaw(outgoing.lines[seq]).catch((err) => {
+    note(`transfer failed: ${err.message}`, true);
+    endTransfer(null);
+  });
+  outgoing.timer = setTimeout(pumpTransfer, FRAG_ECHO_TIMEOUT_MS);
+}
+
+function endTransfer(reason) {
+  if (!outgoing) return;
+  clearTimeout(outgoing.timer);
+  outgoing = null;
+  els.mediaState.textContent = 'idle';
+  if (reason) note(reason);
+}
+
+async function sendBlob(bytes, kind, label) {
+  if (!transport) {
+    note('connect a board first', true);
+    return;
+  }
+  if (outgoing) {
+    note('a transfer is already running', true);
+    return;
+  }
+
+  const est = media.transferEstimate(bytes.length, { sf: currentSf });
+  const ok = window.confirm(
+    `Send ${label}?\n\n${bytes.length} bytes in ${est.fragments} fragments\n` +
+      `about ${media.formatDuration(est.ms)} of airtime at SF${currentSf}\n\n` +
+      'Nothing else can use the channel while this runs.'
+  );
+  if (!ok) return;
+
+  // Encrypt once for the whole blob. Encrypting each fragment would add 28
+  // bytes plus base64 expansion to every one and roughly halve throughput.
+  let payload = media.bytesToBase64(bytes);
+  const encrypted = !!cryptoKey;
+  if (encrypted) {
+    const wrapped = await encryptMessage(cryptoKey, payload);
+    payload = wrapped.slice(wrapped.indexOf(' ') + 1);
+  }
+
+  const id = frag.makeId();
+  const lines = frag.packFragments({ id, kind, encrypted, payload });
+  outgoing = { id, kind, lines, queue: lines.map((_, i) => i), timer: null, rounds: 0 };
+  note(`sending ${label}: ${lines.length} fragments, ~${media.formatDuration(est.ms)}`);
+  pumpTransfer();
+}
+
+function assemblyProgress(asm) {
+  els.mediaState.textContent =
+    `receiving ${frag.receivedCount(asm)}/${asm.total}`;
+}
+
+async function finishAssembly(asm, who, rssi, snr) {
+  assemblies.delete(asm.id);
+  els.mediaState.textContent = 'idle';
+
+  let payload = frag.assembled(asm);
+  if (asm.encrypted) {
+    if (!cryptoKey) {
+      note(`${who} sent encrypted media - set the passphrase to open it`, true);
+      return;
+    }
+    const plain = await decryptMessage(cryptoKey, `!ENC ${payload}`);
+    if (plain === null) {
+      note(`could not decrypt media from ${who} - different passphrase?`, true);
+      return;
+    }
+    payload = plain;
+  }
+
+  let bytes;
+  try {
+    bytes = media.base64ToBytes(payload);
+  } catch {
+    note(`media from ${who} was corrupt`, true);
+    return;
+  }
+
+  if (asm.kind === 'i') {
+    const img = media.unpackImage(bytes);
+    if (!img) {
+      note(`unrecognised image from ${who}`, true);
+      return;
+    }
+    mediaBubble(who, imageCanvas(img), `image ${img.w}x${img.h}`, rssi, snr);
+  } else if (asm.kind === 'a') {
+    const clip = media.unpackAudio(bytes);
+    if (!clip) {
+      note(`unrecognised audio from ${who}`, true);
+      return;
+    }
+    const pcm = media.decodeAdpcm(clip.bytes, clip.sampleCount);
+    const el = document.createElement('audio');
+    el.controls = true;
+    el.src = URL.createObjectURL(wavBlob(pcm, clip.sampleRate));
+    el.style.width = '100%';
+    const secs = (clip.sampleCount / clip.sampleRate).toFixed(1);
+    mediaBubble(who, el, `audio ${secs}s at ${clip.sampleRate} Hz`, rssi, snr);
+  }
+  audio.chirpReceived();
+}
+
+function imageCanvas({ w, h, bytes }) {
+  const gray = media.bitmapToGray(bytes, w, h);
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  const ctx = c.getContext('2d');
+  const img = ctx.createImageData(w, h);
+  for (let i = 0; i < w * h; i++) {
+    img.data[i * 4] = img.data[i * 4 + 1] = img.data[i * 4 + 2] = gray[i];
+    img.data[i * 4 + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  c.style.imageRendering = 'pixelated';   // it is 1-bit art; do not smooth it
+  c.style.width = '100%';
+  c.style.maxWidth = `${w * 3}px`;
+  c.style.display = 'block';
+  return c;
+}
+
+function wavBlob(pcm, rate) {
+  const buf = new ArrayBuffer(44 + pcm.length * 2);
+  const v = new DataView(buf);
+  const ascii = (at, s) => { for (let i = 0; i < s.length; i++) v.setUint8(at + i, s.charCodeAt(i)); };
+  ascii(0, 'RIFF');
+  v.setUint32(4, 36 + pcm.length * 2, true);
+  ascii(8, 'WAVEfmt ');
+  v.setUint32(16, 16, true);
+  v.setUint16(20, 1, true);           // PCM
+  v.setUint16(22, 1, true);           // mono
+  v.setUint32(24, rate, true);
+  v.setUint32(28, rate * 2, true);
+  v.setUint16(32, 2, true);
+  v.setUint16(34, 16, true);
+  ascii(36, 'data');
+  v.setUint32(40, pcm.length * 2, true);
+  for (let i = 0; i < pcm.length; i++) v.setInt16(44 + i * 2, pcm[i], true);
+  return new Blob([buf], { type: 'audio/wav' });
+}
+
+function mediaBubble(who, node, caption, rssi, snr) {
+  const wrap = document.createElement('div');
+  wrap.className = 'msg recv';
+
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  const w = document.createElement('span');
+  w.className = 'who';
+  w.textContent = who;
+  meta.appendChild(w);
+  if (Number.isFinite(rssi)) {
+    const s = document.createElement('span');
+    s.className = 'sig ' + signalLevel(rssi);
+    s.textContent = `${rssi} dBm / ${snr} dB`;
+    meta.appendChild(s);
+  }
+  wrap.appendChild(meta);
+  wrap.appendChild(node);
+
+  const cap = document.createElement('div');
+  cap.className = 'caption';
+  cap.textContent = caption;
+  wrap.appendChild(cap);
+
+  append(wrap);
+}
+
+// Handles every !B line. Returns true if the line was media traffic.
+function handleFragmentLine(text, who, rssi, snr) {
+  const f = frag.parseFragment(text);
+  if (f) {
+    let asm = assemblies.get(f.id);
+    if (!asm) {
+      asm = frag.createAssembly(f);
+      assemblies.set(f.id, asm);
+      note(`${who} is sending ${f.kind === 'i' ? 'an image' : 'audio'} (${f.total} fragments)`);
+    }
+    if (frag.addFragment(asm, f)) assemblyProgress(asm);
+    asm.rssi = rssi;
+    asm.snr = snr;
+    asm.who = who;
+    if (frag.isComplete(asm)) finishAssembly(asm, who, rssi, snr);
+    return true;
+  }
+
+  const endId = frag.parseEnd(text);
+  if (endId) {
+    const asm = assemblies.get(endId);
+    if (!asm) return true;
+    if (frag.isComplete(asm)) {
+      finishAssembly(asm, who, asm.rssi, asm.snr);
+      return true;
+    }
+    const missing = frag.missingOf(asm);
+    asm.rounds = (asm.rounds || 0) + 1;
+    if (asm.rounds > MAX_RESEND_ROUNDS) {
+      assemblies.delete(endId);
+      els.mediaState.textContent = 'idle';
+      note(`gave up on media from ${who}: ${missing.length} fragments never arrived`, true);
+      return true;
+    }
+    note(`asking ${who} to resend ${missing.length} fragments`);
+    for (const batch of frag.splitRequest(endId, missing)) {
+      sendRaw(frag.requestLine(endId, batch)).catch(() => {});
+    }
+    return true;
+  }
+
+  const req = frag.parseRequest(text);
+  if (req) {
+    if (!outgoing || outgoing.id !== req.id) return true;
+    const valid = req.missing.filter((s) => s >= 0 && s < outgoing.lines.length);
+    note(`resending ${valid.length} fragments`);
+    outgoing.queue.push(...valid);
+    clearTimeout(outgoing.timer);
+    pumpTransfer();
+    return true;
+  }
+  return false;
+}
+
+// Drop inbound transfers that stalled, so a half-received image does not sit
+// in memory forever waiting for fragments that are never coming.
+setInterval(() => {
+  for (const [id, asm] of assemblies) {
+    if (Date.now() - asm.updatedAt > ASSEMBLY_IDLE_MS) {
+      assemblies.delete(id);
+      note(`abandoned an incomplete transfer from ${asm.who || 'peer'}`, true);
+      els.mediaState.textContent = 'idle';
+    }
+  }
+}, 15000);
+
+// Capture -----------------------------------------------------------------
+
+async function onImageChosen(file) {
+  if (!file) return;
+  const targetW = Number(els.imgWidth.value);
+  try {
+    const bmp = await createImageBitmap(file);
+    const w = targetW;
+    const h = Math.max(1, Math.round((bmp.height / bmp.width) * w));
+    const c = document.createElement('canvas');
+    c.width = w;
+    c.height = h;
+    const ctx = c.getContext('2d');
+    ctx.drawImage(bmp, 0, 0, w, h);
+    const px = ctx.getImageData(0, 0, w, h).data;
+
+    // Rec. 601 luma, then dithered to 1 bit. A plain threshold at this size
+    // loses every gradient in the picture.
+    const gray = new Uint8ClampedArray(w * h);
+    for (let i = 0; i < w * h; i++) {
+      gray[i] = 0.299 * px[i * 4] + 0.587 * px[i * 4 + 1] + 0.114 * px[i * 4 + 2];
+    }
+    const bytes = media.packImage(media.ditherToBitmap(gray, w, h), w, h);
+
+    // Show the sender exactly what the other end will see.
+    mediaBubble('you', imageCanvas({ w, h, bytes: bytes.subarray(7) }), `image ${w}x${h}`, null, null);
+    await sendBlob(bytes, 'i', `a ${w}x${h} image`);
+  } catch (err) {
+    note(`could not read that image: ${err.message}`, true);
+  }
+}
+
+async function encodeAndSendAudio(blob, label) {
+  const rate = Number(els.audRate.value);
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const decoded = await ctx.decodeAudioData(await blob.arrayBuffer());
+    const down = media.downsample(decoded.getChannelData(0), decoded.sampleRate, rate);
+    const pcm = media.floatToInt16(down);
+    const bytes = media.packAudio(media.encodeAdpcm(pcm), rate, pcm.length);
+    ctx.close();
+    await sendBlob(bytes, 'a', `${label} (${(pcm.length / rate).toFixed(1)}s at ${rate} Hz)`);
+  } catch (err) {
+    note(`could not encode that audio: ${err.message}`, true);
+  }
+}
+
+async function toggleRecord() {
+  if (recorder) {
+    recorder.stop();
+    return;
+  }
+  if (!navigator.mediaDevices?.getUserMedia) {
+    note('this browser has no microphone access', true);
+    return;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    recordChunks = [];
+    recorder = new MediaRecorder(stream);
+    recorder.ondataavailable = (e) => e.data.size && recordChunks.push(e.data);
+    recorder.onstop = async () => {
+      stream.getTracks().forEach((t) => t.stop());
+      const blob = new Blob(recordChunks, { type: recorder.mimeType });
+      recorder = null;
+      els.recBtn.textContent = 'Rec';
+      els.recBtn.classList.add('ghost');
+      await encodeAndSendAudio(blob, 'a recording');
+    };
+    recorder.start();
+    els.recBtn.textContent = 'Stop';
+    els.recBtn.classList.remove('ghost');
+    note('recording - press Stop when done. Keep it short.');
+  } catch (err) {
+    note(`microphone refused: ${err.message}`, true);
+  }
+}
+
+els.imgBtn.addEventListener('click', () => els.imgFile.click());
+els.imgFile.addEventListener('change', (e) => {
+  onImageChosen(e.target.files[0]);
+  e.target.value = '';
+});
+els.audBtn.addEventListener('click', () => els.audFile.click());
+els.audFile.addEventListener('change', (e) => {
+  if (e.target.files[0]) encodeAndSendAudio(e.target.files[0], 'an audio file');
+  e.target.value = '';
+});
+els.recBtn.addEventListener('click', () => {
+  audio.unlock();
+  toggleRecord();
+});
+els.mediaBtn.addEventListener('click', () => togglePanel(els.mediaPanel));
 
 // Link test ---------------------------------------------------------------
 
@@ -680,7 +1074,9 @@ function stopRinging(answer, reason, silent = false) {
 // Only one panel at a time - stacking them pushed the log off a phone screen.
 function togglePanel(target) {
   const wasOpen = target.classList.contains('show');
-  for (const p of [els.posPanel, els.testPanel, els.setPanel]) p.classList.remove('show');
+  for (const p of [els.posPanel, els.testPanel, els.setPanel, els.mediaPanel]) {
+    p.classList.remove('show');
+  }
   if (!wasOpen) target.classList.add('show');
 }
 

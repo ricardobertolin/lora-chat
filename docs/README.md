@@ -34,6 +34,8 @@ rewritten in JavaScript.
 | `history.js` | Chat history persistence and capping. |
 | `survey.js` | Probe bookkeeping, delivery ratio and link-margin maths. |
 | `audio.js` | Chirps and the ring tone, synthesised with WebAudio - no assets. |
+| `fragment.js` | Splits a blob across packets and reassembles it, with resend requests. |
+| `media.js` | Dithering, ADPCM, and the LoRa airtime formula. |
 | `backdrop.js` | The wireframe backdrop. Binds to the UI by observation, so app.js does not know it exists. |
 | `vendor/` | three.js and the display font, held locally so the app runs offline. |
 | `sw.js`, `manifest.webmanifest` | PWA shell, so it installs and runs offline. |
@@ -202,6 +204,53 @@ simply gives up, the ringing stops on its own after four missed repeats.
 Browsers refuse to make noise before the first interaction with the page, so the
 audio context is unlocked on the first tap.
 
+## Sending images and audio
+
+**Med** -> pick a file, or **Rec** to record. You get an airtime estimate and a
+confirmation before anything goes out, because a few seconds of sound can hold
+the channel for minutes.
+
+| | Encoding | Size | At SF9 |
+| --- | --- | --- | --- |
+| Image | 1-bit Floyd-Steinberg dither | 128x64 = 1 kB | ~15 s |
+| Image | as above | 192x144 = 3.4 kB | ~50 s |
+| Audio | 4-bit IMA ADPCM, 4 kHz | 2 kB per second | ~30 s per second of sound |
+
+Dithering rather than a threshold, because at one bit a threshold destroys every
+gradient. The sender sees the dithered result in the log before it goes, so
+there are no surprises about what arrived.
+
+**Drop to `/sf 7` before sending media.** It is roughly four times faster than
+SF9 and you almost certainly do not need SF12's range for this.
+
+### How it works
+
+Blobs are split into `!B<id>.<seq>.<total>.<kind><enc> <chunk>` lines of at most
+180 characters - the firmware caps a line at 200 and prefixes the node name.
+After the last one the sender emits `!BE<id>`; the receiver replies
+`!BR<id> 3,7,12` for anything missing, and the sender resends. Three rounds,
+then it gives up.
+
+Two decisions worth knowing:
+
+- **The blob is encrypted once, not per fragment.** Encrypting each line would
+  add 28 bytes plus base64 expansion to every one and roughly halve throughput.
+  The headers stay in the clear as a result - sequence numbers and a one-letter
+  kind, no more than the sender name already leaks.
+- **Sending is paced by the board's own `>>` echo**, not a fixed delay. The
+  firmware transmits synchronously, so dumping thirty lines into a 256-byte
+  serial buffer would simply lose most of them.
+
+### On audio quality
+
+ADPCM is not a speech codec. It is fixed at 4 bits per sample, so 4 kHz audio
+costs 2 kB per second - about thirty times slower than real time at SF9.
+
+The right answer is **Codec2**, the vocoder ham radio uses for HF digital voice,
+which runs at 700-1600 bit/s. Ten seconds of speech would be roughly 875 bytes
+instead of 20 kB, near real time even at SF9. It needs a WASM build vendored in,
+which is why it is not here yet.
+
 ## Radio commands
 
 Anything typed starting with `/` is handled by the board instead of being sent:
@@ -286,16 +335,22 @@ from the PC - and a USB-C OTG adapter if it is USB-A on the other end.
 Working on hardware: **Web Serial** on Windows desktop and **WebUSB** on
 Android, both chatting through a Heltec V3.
 
-Unit-tested (`npm test`, 67 tests): the serial line parser against output
+Unit-tested (`npm test`, 101 tests): the serial line parser against output
 captured from real sessions, position encoding and great-circle maths,
 encryption against Node's WebCrypto (round-trip, wrong key, tampering,
-truncation, unicode), history capping and corrupt-storage handling, and the
-survey statistics (in-flight probes excluded from delivery ratio, duplicate
-replies rejected, margin and range factor).
+truncation, unicode), history capping and corrupt-storage handling, survey
+statistics (in-flight probes excluded from delivery ratio, duplicate replies
+rejected, margin and range factor), fragmentation (line limits, out-of-order
+arrival, duplicate and foreign fragments, resend batching), and the media
+codecs (airtime against published figures, dither density and gradients, ADPCM
+round-trip above 20 dB SNR).
 
-Not covered by tests: the two transports, WebAudio and the DOM, which need a
-real browser. The `!PING`/`!PONG`/`!CALL` messages are confirmed to relay
-between two boards with RSSI and SNR intact.
+Confirmed on hardware: `!PING`/`!PONG`/`!CALL` relay between two boards with
+RSSI and SNR intact, and a full-size 180-character fragment survives the
+firmware unmodified.
+
+Not covered by tests: the two transports, WebAudio, MediaRecorder and the DOM,
+which need a real browser.
 
 If Android ever stops enumerating the board, the CP2102 setup in `transport.js`
 (`IFC_ENABLE`, `SET_BAUDRATE`, `SET_LINE_CTL`, `SET_MHS`, per Silicon Labs

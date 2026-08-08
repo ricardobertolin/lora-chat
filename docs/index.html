@@ -267,7 +267,28 @@
   }
 
   /* ===== panels ===== */
-  #posPanel, #setPanel, #testPanel {
+  .caption {
+    margin-top: 6px;
+    padding-top: 4px;
+    border-top: 1px solid var(--line-dim);
+    font-size: 11px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+  }
+  .msg canvas, .msg audio { border: 1px solid var(--line-dim); }
+
+  select {
+    font-family: var(--ming);
+    font-size: 13px;
+    padding: 6px 8px;
+    background: #000;
+    color: var(--ink);
+    border: 1px solid var(--line-dim);
+    border-radius: 0;
+  }
+
+  #posPanel, #setPanel, #testPanel, #mediaPanel {
     display: none;
     flex-direction: column;
     gap: 10px;
@@ -277,7 +298,7 @@
     font-size: 15px;
     flex: 0 0 auto;
   }
-  #posPanel.show, #setPanel.show, #testPanel.show { display: flex; }
+  #posPanel.show, #setPanel.show, #testPanel.show, #mediaPanel.show { display: flex; }
   .prow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .prow strong {
     font-weight: normal;
@@ -415,6 +436,7 @@
   <nav class="acts">
     <button id="posBtn" class="ghost" title="Position sharing">Pos</button>
     <button id="testBtn" class="ghost" title="Link test and statistics">Test</button>
+    <button id="mediaBtn" class="ghost" title="Send an image or audio">Med</button>
     <button id="callBtn" class="ghost" title="Ring the other side until they answer">Call</button>
     <button id="setBtn" class="ghost" title="Encryption, sound, history, diagnostics">Set</button>
     <button id="connect">Connect</button>
@@ -463,6 +485,37 @@
   </div>
   <div class="meter" id="testMeter" title="link margin"></div>
   <div class="stats" id="testStats">no samples yet</div>
+</div>
+
+<div id="mediaPanel">
+  <div class="prow">
+    <strong>Media</strong>
+    <span id="mediaState" class="muted">idle</span>
+  </div>
+  <div class="prow">
+    <button id="imgBtn" class="ghost sm">Send image</button>
+    <button id="audBtn" class="ghost sm">Send audio file</button>
+    <button id="recBtn" class="ghost sm">Rec</button>
+  </div>
+  <div class="prow">
+    <strong>width</strong>
+    <select id="imgWidth">
+      <option value="96">96 px</option>
+      <option value="128" selected>128 px</option>
+      <option value="192">192 px</option>
+    </select>
+    <strong>audio</strong>
+    <select id="audRate">
+      <option value="4000" selected>4 kHz</option>
+      <option value="6000">6 kHz</option>
+      <option value="8000">8 kHz</option>
+    </select>
+  </div>
+  <div class="prow hint">Images go 1-bit dithered, audio 4-bit ADPCM. You get an
+    airtime estimate before anything is sent - a few seconds of sound can occupy
+    the channel for minutes. Lower the spreading factor first with /sf 7.</div>
+  <input type="file" id="imgFile" accept="image/*" hidden>
+  <input type="file" id="audFile" accept="audio/*" hidden>
 </div>
 
 <div id="setPanel">
