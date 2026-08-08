@@ -719,23 +719,25 @@ function endTransfer(reason) {
   if (reason) note(reason);
 }
 
-async function sendBlob(bytes, kind, label) {
+async function sendBlob(bytes, kind, label, { confirm = true } = {}) {
   if (!transport) {
     note('connect a board first', true);
-    return;
+    return false;
   }
   if (outgoing) {
     note('a transfer is already running', true);
-    return;
+    return false;
   }
 
   const est = media.transferEstimate(bytes.length, { sf: currentSf });
-  const ok = window.confirm(
-    `Send ${label}?\n\n${bytes.length} bytes in ${est.fragments} fragments\n` +
-      `about ${media.formatDuration(est.ms)} of airtime at SF${currentSf}\n\n` +
-      'Nothing else can use the channel while this runs.'
-  );
-  if (!ok) return;
+  if (confirm) {
+    const ok = window.confirm(
+      `Send ${label}?\n\n${bytes.length} bytes in ${est.fragments} fragments\n` +
+        `about ${media.formatDuration(est.ms)} of airtime at SF${currentSf}\n\n` +
+        'Nothing else can use the channel while this runs.'
+    );
+    if (!ok) return false;
+  }
 
   // Encrypt once for the whole blob. Encrypting each fragment would add 28
   // bytes plus base64 expansion to every one and roughly halve throughput.
@@ -755,6 +757,7 @@ async function sendBlob(bytes, kind, label) {
   // One line in the log for the whole transfer; the rest goes to the bar.
   note(`sending ${label}: ${lines.length} fragments, ~${media.formatDuration(est.ms)}`);
   pumpTransfer();
+  return true;
 }
 
 // Transfer progress lives in its own bar rather than the log. A 30-fragment
@@ -765,7 +768,7 @@ function renderXfer() {
   let total = 0;
 
   if (outgoing) {
-    const what = outgoing.kind === 'i' ? 'image' : 'audio';
+    const what = { i: 'image', a: 'audio', t: 'long message' }[outgoing.kind] || 'data';
     total = outgoing.lines.length;
     done = outgoing.sent || 0;
     label = outgoing.phase === 'waiting'
@@ -778,7 +781,7 @@ function renderXfer() {
       if (!newest || asm.updatedAt > newest.updatedAt) newest = asm;
     }
     if (newest) {
-      const what = newest.kind === 'i' ? 'image' : 'audio';
+      const what = { i: 'image', a: 'audio', t: 'long message' }[newest.kind] || 'data';
       done = frag.receivedCount(newest);
       total = newest.total;
       label = `receiving ${what} from ${newest.who || 'peer'} ${done}/${total}`;
@@ -820,6 +823,24 @@ async function finishAssembly(asm, who, rssi, snr) {
     bytes = media.base64ToBytes(payload);
   } catch {
     note(`media from ${who} was corrupt`, true);
+    return;
+  }
+
+  if (asm.kind === 't') {
+    // A long chat message. It carries the same "!M<seq> text" line a short one
+    // would, so it is rendered and acknowledged through the identical path.
+    const line = new TextDecoder().decode(bytes);
+    const chat = msg.decodeMessage(line);
+    bubble({
+      mine: false,
+      who: msg.displayName(nodes.get(who)),
+      text: chat ? chat.text : line,
+      rssi,
+      snr,
+      locked: asm.encrypted,
+    });
+    audio.chirpReceived();
+    if (chat) sendText(msg.encodeAck(who, chat.seq)).catch(() => {});
     return;
   }
 
@@ -921,7 +942,8 @@ function handleFragmentLine(text, who, rssi, snr) {
     if (!asm) {
       asm = frag.createAssembly(f);
       assemblies.set(f.id, asm);
-      note(`${who} is sending ${f.kind === 'i' ? 'an image' : 'audio'} (${f.total} fragments)`);
+      const what = { i: 'an image', a: 'audio', t: 'a long message' }[f.kind] || 'data';
+      note(`${who} is sending ${what} (${f.total} fragments)`);
     }
     asm.rssi = rssi;
     asm.snr = snr;
@@ -1329,16 +1351,43 @@ function queueMessage(text, why) {
 }
 
 // Sends one chat message with a sequence number and starts its delivery clock.
+//
+// The firmware caps a serial line at 200 characters and quietly transmits the
+// remainder as a second packet. Unencrypted that shows up as a truncated
+// message plus an orphaned tail; encrypted it splits the ciphertext so neither
+// half authenticates, and the receiver blames the passphrase. Anything that
+// would not fit therefore goes through the same fragmentation the media path
+// uses, carrying the identical "!M<seq> text" line so the reassembled message
+// is acknowledged exactly like a short one.
 async function sendChat(text) {
   const seq = ++msgSeq;
+  const line = msg.encodeMessage(seq, text);
+  const wire = cryptoKey ? await encryptMessage(cryptoKey, line) : line;
   const el = bubble({ mine: true, text, locked: !!cryptoKey, status: 'sending' });
 
-  try {
-    await sendText(msg.encodeMessage(seq, text));
-  } catch (err) {
-    setBubbleStatus(el, 'failed');
-    queueMessage(text, `send failed: ${err.message}`);
-    return;
+  let ackWindow = ACK_TIMEOUT_MS;
+
+  if (wire.length > frag.MAX_LINE) {
+    const bytes = new TextEncoder().encode(line);
+    const est = media.transferEstimate(bytes.length, { sf: currentSf });
+    // A long message takes real time to send, so the delivery clock has to
+    // outlast the transfer or it would report "no ack" on a healthy link.
+    ackWindow = est.ms + ACK_TIMEOUT_MS;
+
+    const started = await sendBlob(bytes, 't', 'a long message', { confirm: false });
+    if (!started) {
+      setBubbleStatus(el, 'failed');
+      queueMessage(text, 'could not start the transfer');
+      return;
+    }
+  } else {
+    try {
+      await sendRaw(wire);
+    } catch (err) {
+      setBubbleStatus(el, 'failed');
+      queueMessage(text, `send failed: ${err.message}`);
+      return;
+    }
   }
 
   setBubbleStatus(el, 'sent');
@@ -1349,7 +1398,7 @@ async function sendChat(text) {
       pendingAcks.delete(seq);
       setBubbleStatus(el, 'no ack');
       queueMessage(text, 'no acknowledgement');
-    }, ACK_TIMEOUT_MS),
+    }, ackWindow),
   });
 }
 
