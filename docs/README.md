@@ -24,8 +24,15 @@ rewritten in JavaScript.
 ## Version
 
 The running build reports itself next to the title in the header, and in the
-diagnostics line. If your phone shows an older number than your desktop after a
-push, its service worker has not updated yet - reload once.
+diagnostics line.
+
+Installed copies update themselves: the service worker is registered with
+`updateViaCache: 'none'`, which stops the browser handing back a cached `sw.js`
+and never noticing a release at all - that alone is why an installed app could
+sit on an old build indefinitely. It also re-checks every thirty minutes and
+whenever the app returns to the foreground. When a new worker takes over, the
+page reloads, unless a board is connected or a transfer is running, in which
+case a bar appears and the reload waits for you.
 
 **On every change: bump `VERSION` in `version.js` and the matching `CACHE` name
 in `sw.js`.** They live in two files that cannot import each other - one is a
@@ -139,6 +146,26 @@ Three departures from the original design, all so it survives the field:
 cached once and never fetched again, but if that matters more than the backdrop,
 delete `backdrop.js` and its `<script>` tag - nothing else references it.
 
+## Sharing a channel
+
+**Set -> Share setup** shows a QR code and a link carrying frequency, spreading
+factor, bandwidth, power and the passphrase. **Scan setup** reads one with the
+camera. Scanning applies the passphrase and sends the matching `/bw`, `/power`,
+`/sf` and `/freq` to the board - which then propagates them to the other end
+with the usual rollback if the link dies.
+
+This replaces the worst friction in the project: matching four radio settings
+and a passphrase by hand, with **no feedback when you get it wrong** - a
+mismatch looks exactly like nobody being there.
+
+The payload rides in the URL **fragment**, which browsers never send to a
+server, so the passphrase stays on the two devices. The app strips it from the
+address bar immediately after applying, to keep it out of history. Anyone who
+can see the code can join, so treat it like the password it contains.
+
+Scanning uses the browser's native `BarcodeDetector`. Where that is missing, the
+link still works - send it by any other means and opening it does the same job.
+
 ## Encryption
 
 **Set** -> type a shared passphrase -> **Enable**, on both ends. Messages then go
@@ -182,9 +209,13 @@ switching it off should not leave the previous conversation on disk. **Clear**
 wipes the log without changing the setting.
 
 **Set -> Accent** changes the green, either from the swatches or the colour
-picker. It reaches the CSS, the radar canvas and the WebGL backdrop, which are
-three unrelated renderers - hence `theme.js` broadcasting an event rather than
-the settings panel reaching into each of them.
+picker. It reaches the CSS, the radar canvas, the WebGL backdrop and the browser
+tab icon, which are four unrelated renderers - hence `theme.js` broadcasting an
+event rather than the settings panel reaching into each of them.
+
+The **installed** home-screen icon cannot follow: Android bakes it from the
+manifest at install time, so only the browser tab recolours. Reinstalling picks
+up the current colour.
 
 ## Link test
 

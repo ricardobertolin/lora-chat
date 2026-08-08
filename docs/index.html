@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -246,6 +246,23 @@
   }
   #banner.show { display: block; }
 
+  #updateBar {
+    display: none;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 14px;
+    background: var(--acid);
+    color: #000;
+    font-size: 12px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    flex: 0 0 auto;
+  }
+  #updateBar.show { display: flex; }
+  #updateBar span { flex: 1; }
+  #updateBar button { background: #000; color: var(--acid); border: 0; }
+  #updateBar button:hover { background: #222; }
+
   /* ===== transfer progress =====
      Its own strip rather than the log: a thirty-fragment image would otherwise
      bury the conversation under its own progress reports. */
@@ -319,6 +336,36 @@
     color: var(--ink-dim);
   }
   .msg canvas, .msg audio { border: 1px solid var(--line-dim); }
+
+  .qr {
+    width: 168px;
+    height: 168px;
+    background: #fff;
+    border: 6px solid #fff;
+    image-rendering: pixelated;
+    flex: 0 0 auto;
+  }
+  .qrside {
+    flex: 1 1 200px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+  }
+  #shareLink {
+    font-size: 11px;
+    letter-spacing: 0;
+    padding: 6px 8px;
+    border: 1px solid var(--line-dim);
+    background: #000;
+    text-transform: none;
+  }
+  #scanVideo {
+    width: 100%;
+    max-width: 320px;
+    background: #000;
+    border: 1px solid var(--line-dim);
+  }
 
   .radar {
     width: 100%;
@@ -497,7 +544,7 @@
 
 <header>
   <div class="title">
-    <span>LoRa Chat <i id="ver">v0.12.0</i></span>
+    <span>LoRa Chat <i id="ver">v0.13.0</i></span>
     <small id="sub">not connected</small>
   </div>
   <div class="spacer"></div>
@@ -516,6 +563,11 @@
   <span id="callText">Incoming call</span>
   <button id="answerBtn" class="sm">Answer</button>
   <button id="dismissBtn" class="ghost sm">Dismiss</button>
+</div>
+
+<div id="updateBar">
+  <span>A newer version is ready</span>
+  <button id="updateNow" class="sm">Reload</button>
 </div>
 
 <div id="xfer">
@@ -606,6 +658,24 @@
   </div>
   <div class="prow hint">Both ends need the same passphrase. Sender names and
     timing stay visible; only the message text is hidden.</div>
+  <div class="prow">
+    <strong>Channel</strong>
+    <button id="shareBtn2" class="ghost sm">Share setup</button>
+    <button id="scanBtn" class="ghost sm">Scan setup</button>
+  </div>
+  <div class="prow hint" id="shareBox" hidden>
+    <canvas id="qr" class="qr"></canvas>
+    <div class="qrside">
+      <div id="shareDesc"></div>
+      <input type="text" id="shareLink" readonly autocomplete="off">
+      <button id="copyLink" class="ghost sm">Copy link</button>
+      <button id="shareClose" class="ghost sm">Close</button>
+    </div>
+  </div>
+  <div class="prow" id="scanBox" hidden>
+    <video id="scanVideo" playsinline muted></video>
+    <button id="scanStop" class="ghost sm">Stop</button>
+  </div>
   <div class="prow">
     <strong>Sound</strong>
     <span id="soundState" class="muted"></span>

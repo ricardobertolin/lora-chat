@@ -1,6 +1,6 @@
 {
   "name": "LoRa Chat",
-  "short_name": "LoRa",
+  "short_name": "LoRa Chat",
   "description": "Chat over LoRa through a Heltec WiFi LoRa 32 V3 plugged into USB.",
   "start_url": "./",
   "scope": "./",

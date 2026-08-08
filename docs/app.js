@@ -21,6 +21,9 @@ import * as presence from './presence.js';
 import { drawRadar } from './radar.js';
 import { applyAccent, readAccent } from './theme.js';
 import { VERSION } from './version.js';
+import * as channel from './channel.js';
+import { paintFavicon } from './favicon.js';
+import qrcode from './vendor/qrcode.js';
 import {
   pickTransport,
   describeCapabilities,
@@ -65,6 +68,19 @@ const els = {
   accentIn: document.getElementById('accentIn'),
   radar: document.getElementById('radar'),
   ver: document.getElementById('ver'),
+  updateBar: document.getElementById('updateBar'),
+  updateNow: document.getElementById('updateNow'),
+  shareBtn2: document.getElementById('shareBtn2'),
+  scanBtn: document.getElementById('scanBtn'),
+  shareBox: document.getElementById('shareBox'),
+  shareDesc: document.getElementById('shareDesc'),
+  shareLink: document.getElementById('shareLink'),
+  copyLink: document.getElementById('copyLink'),
+  shareClose: document.getElementById('shareClose'),
+  qr: document.getElementById('qr'),
+  scanBox: document.getElementById('scanBox'),
+  scanVideo: document.getElementById('scanVideo'),
+  scanStop: document.getElementById('scanStop'),
   soundState: document.getElementById('soundState'),
   soundToggle: document.getElementById('soundToggle'),
   testBtn: document.getElementById('testBtn'),
@@ -136,7 +152,12 @@ let log = [];  // persisted chat history
 const SOUND_KEY = 'lora-chat-sound';
 const CALL_REPEAT_MS = 4000;
 
-let currentSf = 9;         // tracked from the firmware's settings lines
+// Tracked from the firmware's settings lines, so sharing a channel sends what
+// the radio is actually on rather than what the app assumes.
+let currentSf = 9;
+let currentFreq = 915;
+let currentBw = 125;
+let currentPower = 14;
 let activeSurvey = null;
 let surveyTimer = null;
 let surveyRender = null;
@@ -442,6 +463,9 @@ function handleLine(raw) {
       break;
     case 'cfg':
       currentSf = ev.sf;
+      currentFreq = ev.freq;
+      currentBw = ev.bw;
+      currentPower = ev.power;
       note(ev.text.replace(/^~~\s*/, ''));
       break;
     case 'banner':
@@ -450,6 +474,8 @@ function handleLine(raw) {
       note(`board ready — this node is ${ev.node}`);
       break;
     case 'radio':
+      currentSf = ev.sf;
+      currentFreq = ev.freq;
       els.banner.textContent = `${ev.freq} MHz · SF${ev.sf} — the other board must match`;
       els.banner.classList.add('show');
       break;
@@ -1218,6 +1244,155 @@ els.soundToggle.addEventListener('click', () => {
   if (next) audio.chirpReceived();
 });
 
+// Channel sharing ---------------------------------------------------------
+
+// Radio settings come from whatever the board last reported; the passphrase
+// from what is set here. Nothing is invented - if we have not heard a settings
+// line yet, the defaults are what the firmware boots with.
+function currentSetup() {
+  return {
+    freq: currentFreq,
+    sf: currentSf,
+    bw: currentBw,
+    power: currentPower,
+    passphrase: localStorage.getItem(PASS_KEY) || null,
+  };
+}
+
+function drawQr(text) {
+  const q = qrcode(0, 'M');       // auto version, medium error correction
+  q.addData(text);
+  q.make();
+
+  const n = q.getModuleCount();
+  const quiet = 2;
+  const size = n + quiet * 2;
+  const canvas = els.qr;
+  canvas.width = size;
+  canvas.height = size;
+
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, size, size);
+  ctx.fillStyle = '#000';
+  for (let r = 0; r < n; r++) {
+    for (let c = 0; c < n; c++) {
+      if (q.isDark(r, c)) ctx.fillRect(c + quiet, r + quiet, 1, 1);
+    }
+  }
+}
+
+function openShare() {
+  const setup = currentSetup();
+  let link;
+  try {
+    link = channel.buildLink(location.href.split('#')[0], setup);
+  } catch (err) {
+    note(`cannot share these settings: ${err.message}`, true);
+    return;
+  }
+  drawQr(link);
+  els.shareLink.value = link;
+  els.shareDesc.textContent = channel.describeSetup(setup);
+  els.shareBox.hidden = false;
+  els.scanBox.hidden = true;
+}
+
+async function applySetup(setup, source) {
+  note(`applying channel from ${source}: ${channel.describeSetup(setup)}`);
+
+  if (setup.passphrase) {
+    await enableEncryption(setup.passphrase, true);
+    note('passphrase set from the shared channel');
+  }
+
+  if (!transport) {
+    note('radio settings will need a connected board - reconnect and scan again', true);
+    return;
+  }
+  // Sent one at a time: each is broadcast to the other end before being
+  // applied, and the board needs to finish one change before the next.
+  for (const cmd of channel.setupCommands(setup)) {
+    await sendText(cmd).catch(() => {});
+    await new Promise((r) => setTimeout(r, 1200));
+  }
+}
+
+let scanStream = null;
+let scanTimer = null;
+
+async function startScan() {
+  if (!('BarcodeDetector' in window)) {
+    note('this browser cannot scan QR codes - paste the setup link instead', true);
+    return;
+  }
+  try {
+    const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
+    scanStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment' },
+    });
+    els.scanVideo.srcObject = scanStream;
+    await els.scanVideo.play();
+    els.scanBox.hidden = false;
+    els.shareBox.hidden = true;
+
+    scanTimer = setInterval(async () => {
+      try {
+        const found = await detector.detect(els.scanVideo);
+        for (const code of found) {
+          const setup = channel.decodeSetup(code.rawValue);
+          if (setup) {
+            stopScan();
+            audio.chirpReceived();
+            await applySetup(setup, 'a scanned code');
+            return;
+          }
+        }
+      } catch {
+        // A frame that cannot be decoded is normal; keep looking.
+      }
+    }, 400);
+  } catch (err) {
+    note(`camera refused: ${err.message}`, true);
+    stopScan();
+  }
+}
+
+function stopScan() {
+  clearInterval(scanTimer);
+  scanTimer = null;
+  scanStream?.getTracks().forEach((t) => t.stop());
+  scanStream = null;
+  els.scanVideo.srcObject = null;
+  els.scanBox.hidden = true;
+}
+
+els.shareBtn2.addEventListener('click', () =>
+  els.shareBox.hidden ? openShare() : (els.shareBox.hidden = true)
+);
+els.shareClose.addEventListener('click', () => (els.shareBox.hidden = true));
+els.scanBtn.addEventListener('click', () => (scanStream ? stopScan() : startScan()));
+els.scanStop.addEventListener('click', stopScan);
+els.copyLink.addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(els.shareLink.value);
+    note('setup link copied');
+  } catch {
+    els.shareLink.select();
+    note('press copy on the selected link');
+  }
+});
+
+// A link opened from a QR carries the channel in its fragment.
+(async () => {
+  const setup = channel.setupFromHash(location.hash);
+  if (!setup) return;
+  // Strip it straight away: the passphrase should not sit in the address bar
+  // or in browser history.
+  history.replaceState(null, '', location.pathname + location.search);
+  await applySetup(setup, 'the link you opened');
+})();
+
 // Encryption and history controls ----------------------------------------
 
 function renderEncState() {
@@ -1279,6 +1454,7 @@ function setAccent(hex, { persist = true } = {}) {
   const value = applyAccent(hex, { persist });
   els.accentIn.value = value;
   renderRadar();
+  paintFavicon(value);
   return value;
 }
 
@@ -1484,11 +1660,60 @@ if (!caps.webSerial && !caps.webUsb) {
   }
 }
 
+// Updating ----------------------------------------------------------------
+// Without help, an installed copy can sit on an old build indefinitely:
+// browsers may serve sw.js itself from cache, and even once a new worker takes
+// over, the page already holds the previous scripts.
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
+  let reloading = false;
+
+  // A new worker taking control means the page is running against files it did
+  // not load. Reload - but never mid-session, where it would drop the port.
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (reloading) return;
+    reloading = true;
+    if (transport || outgoing) {
+      showUpdateBar();
+      reloading = false;
+    } else {
+      location.reload();
+    }
+  });
+
+  window.addEventListener('load', async () => {
+    try {
+      // updateViaCache 'none' is the important part: otherwise the browser can
+      // hand back a cached sw.js and never notice a release at all.
+      const reg = await navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' });
+
+      reg.addEventListener('updatefound', () => {
+        const fresh = reg.installing;
+        if (!fresh) return;
+        fresh.addEventListener('statechange', () => {
+          if (fresh.state === 'installed' && navigator.serviceWorker.controller) {
+            showUpdateBar();
+          }
+        });
+      });
+
+      // Long-lived installs never reload on their own, so ask periodically and
+      // whenever the app comes back to the foreground.
+      const poll = () => reg.update().catch(() => {});
+      setInterval(poll, 30 * 60 * 1000);
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) poll();
+      });
+    } catch {
+      // No service worker means no offline mode, but the app still runs.
+    }
   });
 }
+
+function showUpdateBar() {
+  els.updateBar.classList.add('show');
+}
+
+els.updateNow.addEventListener('click', () => location.reload());
 
 // The markup carries a fallback so the version is visible even if the module
 // fails; this makes the running build the one that reports itself.
