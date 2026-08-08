@@ -23,7 +23,7 @@ There are two sketches:
 | `build/` | Build output, safe to delete. Not tracked. |
 
 The web app is live at
-<https://ricardobertolin.github.io/lora-chat/> — GitHub Pages serves the `docs/`
+<https://ricardobertolin.github.io/lora_chat_app/> - GitHub Pages serves the `docs/`
 folder, which is why it is named that and not `webapp/`.
 
 ## First time on a new machine
@@ -65,7 +65,7 @@ Only one program can hold a port, so close the IDE's Serial Monitor first.
 
 ### From a phone or a browser
 
-Open <https://ricardobertolin.github.io/lora-chat/> in Chrome or Edge, or run it
+Open <https://ricardobertolin.github.io/lora_chat_app/> in Chrome or Edge, or run it
 locally:
 
 ```powershell
@@ -144,7 +144,7 @@ lower it (down to 7) for the opposite.
 
 Details that trip people up on the V3 specifically, all handled in the sketch:
 
-- The variant header names the SX1262's **DIO1** pin `DIO0` (GPIO14) — a
+- The variant header names the SX1262's **DIO1** pin `DIO0` (GPIO14) - a
   carry-over from the SX127x-based V2. NSS=8, RST=12, BUSY=13, SCK=9, MISO=11,
   MOSI=10.
 - The SX1262 runs off a **1.8 V TCXO**, so `radio.begin()` gets `1.8`. Passing

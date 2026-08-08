@@ -1,6 +1,6 @@
 # LoRa Chat web app
 
-**Live: <https://ricardobertolin.github.io/lora-chat/>**
+**Live: <https://ricardobertolin.github.io/lora_chat_app/>**
 
 A browser client for the `lora_chat` firmware. One codebase runs on desktop and
 Android; it picks its USB transport at runtime.
@@ -51,7 +51,7 @@ and any `chat.py` before connecting, or the port will not appear.
 
 ## Android
 
-Open <https://ricardobertolin.github.io/lora-chat/> in **Chrome** and plug the
+Open <https://ricardobertolin.github.io/lora_chat_app/> in **Chrome** and plug the
 board in with a **USB-C OTG cable** - the phone acts as USB host and powers the
 board, so no battery is needed.
 
