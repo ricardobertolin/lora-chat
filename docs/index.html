@@ -342,6 +342,25 @@
     letter-spacing: 1px;
   }
 
+  /* segmented link-margin meter */
+  .meter {
+    display: flex;
+    gap: 3px;
+    height: 22px;
+    padding: 3px;
+    background: #000;
+    border: 1px solid var(--line-dim);
+  }
+  .meter i {
+    flex: 1;
+    background: #1b1e1a;
+    transition: background .18s ease-out;
+  }
+  .meter.good i.on { background: var(--good); }
+  .meter.fair i.on { background: var(--fair); }
+  .meter.weak i.on { background: var(--weak); }
+  .meter.none i.on { background: var(--line-dim); }
+
   /* ===== wireframe backdrop ===== */
   #bg3d {
     position: fixed;
@@ -442,6 +461,7 @@
     <button id="testStop" class="ghost sm">Stop</button>
     <button id="testCsv" class="ghost sm">Export CSV</button>
   </div>
+  <div class="meter" id="testMeter" title="link margin"></div>
   <div class="stats" id="testStats">no samples yet</div>
 </div>
 

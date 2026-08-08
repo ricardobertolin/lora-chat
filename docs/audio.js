@@ -73,7 +73,15 @@ export function chirpError() {
   tone({ freq: 220, duration: 0.22, type: 'triangle' });
 }
 
-// A probe reply during a survey - deliberately quieter than a real message.
+// A probe going out. Low and very short - during a survey this fires every few
+// seconds for as long as you are walking, so it has to stay unobtrusive.
+export function tickSent() {
+  if (!enabled) return;
+  tone({ freq: 523, duration: 0.025, gain: 0.05 });
+}
+
+// A probe reply. Higher than the outgoing tick, so the pair reads as
+// call-and-answer and a miss is audible as a tick with no echo.
 export function tickProbe() {
   if (!enabled) return;
   tone({ freq: 1568, duration: 0.03, gain: 0.06 });

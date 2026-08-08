@@ -146,6 +146,15 @@ auto-replies `!PONG n`, and the statistics build up live:
 | margin | **The number that matters.** SNR above the floor for the current SF |
 | distance | From shared positions, when both ends have one |
 
+A segmented **meter** above the numbers tracks link margin live: full scale is
+25 dB, which is roughly a desk test at SF9, so a full green bar means as good as
+it gets and an empty one means the link is about to drop. It turns amber under
+10 dB and red under 3.
+
+Sound gives you the same thing without looking: a low tick as each probe goes
+out, a higher one when the reply lands. A tick with no answer is a lost packet,
+so you can walk with the phone in a pocket and hear the link degrade.
+
 **Export CSV** dumps every probe: `seq, sent_at_ms, delivered, rtt_ms, rssi_dbm,
 snr_db, sf`.
 
@@ -184,6 +193,11 @@ replies. **Set -> Sound** toggles it, and the choice is remembered.
 **Call** rings the other side repeatedly until they answer, for when the phone
 is in a pocket. Their app shows an Answer banner and rings until answered or
 dismissed. **Any** message from them also ends the call - replying is answering.
+
+Answer and Dismiss both reply over the air (`!CALLOK` / `!CALLNO`) so the caller
+stops repeating. A dismissal additionally keeps this end quiet for a minute, in
+case that reply was lost and the next `!CALL` arrives anyway. If the caller
+simply gives up, the ringing stops on its own after four missed repeats.
 
 Browsers refuse to make noise before the first interaction with the page, so the
 audio context is unlocked on the first tap.

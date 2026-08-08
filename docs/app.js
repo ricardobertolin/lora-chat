@@ -64,6 +64,7 @@ const els = {
   testCsv: document.getElementById('testCsv'),
   testState: document.getElementById('testState'),
   testStats: document.getElementById('testStats'),
+  testMeter: document.getElementById('testMeter'),
   callBtn: document.getElementById('callBtn'),
   callBanner: document.getElementById('callBanner'),
   callText: document.getElementById('callText'),
@@ -106,8 +107,14 @@ let surveyTimer = null;
 let surveyRender = null;
 let probeSeq = 0;
 
+// How long a dismissal keeps us quiet, so the caller's next repeat does not
+// immediately start the ringing again.
+const DISMISS_QUIET_MS = 60000;
+
 let callTimer = null;      // we are calling out
 let ringingFrom = null;    // someone is calling us
+let ringWatchdog = null;
+let dismissedUntil = 0;
 
 function setConnected(on) {
   els.status.classList.toggle('on', on);
@@ -268,8 +275,9 @@ async function handleRecv(ev) {
     locked = true;
   }
 
-  // Any traffic at all means they are there, so a call in progress is answered.
-  if (callTimer && !text.startsWith('!PING')) stopCalling(`${who} responded`);
+  // Any real message means they are there, so a call in progress is answered.
+  // Probes and call control are excluded - they get explicit handling below.
+  if (callTimer && !/^!(PING|PONG|CALL)/.test(text)) stopCalling(`${who} responded`);
 
   if (text.startsWith('!PING ')) {
     const seq = text.slice(6).trim();
@@ -294,6 +302,10 @@ async function handleRecv(ev) {
   }
   if (text === '!CALLOK') {
     stopCalling(`${who} answered`);
+    return;
+  }
+  if (text === '!CALLNO') {
+    stopCalling(`${who} declined`);
     return;
   }
 
@@ -478,12 +490,42 @@ function toggleShare() {
 
 // Link test ---------------------------------------------------------------
 
+// Segmented level meter for link margin. Full scale is 25 dB, which is about
+// what a desk test gives at SF9 - so a full bar means "as good as it ever gets"
+// and an empty one means the link is about to drop.
+const METER_SEGMENTS = 20;
+const METER_FULL_DB = 25;
+
+function buildMeter() {
+  els.testMeter.textContent = '';
+  for (let i = 0; i < METER_SEGMENTS; i++) {
+    els.testMeter.appendChild(document.createElement('i'));
+  }
+}
+
+function renderMeter(margin) {
+  const segs = els.testMeter.children;
+  if (!segs.length) buildMeter();
+
+  const lit =
+    margin === null ? 0 : Math.round(Math.max(0, Math.min(1, margin / METER_FULL_DB)) * METER_SEGMENTS);
+  // Same thresholds the advisory logic uses: 10 dB of headroom is comfortable,
+  // under 3 dB is about to fail.
+  const level = margin === null ? 'none' : margin >= 10 ? 'good' : margin >= 3 ? 'fair' : 'weak';
+
+  els.testMeter.className = `meter ${level}`;
+  els.testMeter.title = margin === null ? 'no samples yet' : `link margin ${margin.toFixed(1)} dB`;
+  for (let i = 0; i < segs.length; i++) segs[i].classList.toggle('on', i < lit);
+}
+
 function renderSurvey() {
   if (!activeSurvey) {
     els.testStats.textContent = 'no samples yet';
+    renderMeter(null);
     return;
   }
   const r = survey.summarise(activeSurvey);
+  renderMeter(r.margin);
   const cell = (label, value) => {
     const d = document.createElement('div');
     const b = document.createElement('b');
@@ -539,6 +581,7 @@ function startSurvey() {
   const fire = () => {
     probeSeq += 1;
     survey.recordSent(activeSurvey, probeSeq, Date.now());
+    audio.tickSent();
     sendText(`!PING ${probeSeq}`).catch((err) => note(`probe failed: ${err.message}`, true));
     renderSurvey();
   };
@@ -604,6 +647,15 @@ function stopCalling(reason) {
 }
 
 function startRinging(who) {
+  // A caller repeats every few seconds. Without this the next !CALL would
+  // simply start the ringing again a moment after you dismissed it.
+  if (Date.now() < dismissedUntil) return;
+
+  clearTimeout(ringWatchdog);
+  // If the caller gives up, stop ringing rather than waiting forever.
+  ringWatchdog = setTimeout(() => stopRinging(false, 'caller gave up', true), CALL_REPEAT_MS * 4);
+
+  if (ringingFrom) return;  // already ringing, this is just another repeat
   ringingFrom = who;
   els.callText.textContent = `${who} is calling`;
   els.callBanner.classList.add('show');
@@ -611,18 +663,30 @@ function startRinging(who) {
   note(`${who} is calling`);
 }
 
-function stopRinging(sendAck, reason) {
+function stopRinging(answer, reason, silent = false) {
   if (!ringingFrom) return;
+  clearTimeout(ringWatchdog);
   audio.stopRinging();
   els.callBanner.classList.remove('show');
   ringingFrom = null;
-  if (sendAck) sendText('!CALLOK').catch(() => {});
+
+  // Tell the caller either way, so a decline actually stops them repeating.
+  // The quiet period covers that reply being lost on the air.
+  if (!silent) sendText(answer ? '!CALLOK' : '!CALLNO').catch(() => {});
+  if (!answer) dismissedUntil = Date.now() + DISMISS_QUIET_MS;
   note(reason);
+}
+
+// Only one panel at a time - stacking them pushed the log off a phone screen.
+function togglePanel(target) {
+  const wasOpen = target.classList.contains('show');
+  for (const p of [els.posPanel, els.testPanel, els.setPanel]) p.classList.remove('show');
+  if (!wasOpen) target.classList.add('show');
 }
 
 els.testBtn.addEventListener('click', () => {
   audio.unlock();
-  els.testPanel.classList.toggle('show');
+  togglePanel(els.testPanel);
 });
 els.testStart.addEventListener('click', startSurvey);
 els.testStop.addEventListener('click', stopSurvey);
@@ -688,8 +752,8 @@ els.histClear.addEventListener('click', () => {
   note('history cleared');
 });
 
-els.setBtn.addEventListener('click', () => els.setPanel.classList.toggle('show'));
-els.posBtn.addEventListener('click', () => els.posPanel.classList.toggle('show'));
+els.setBtn.addEventListener('click', () => togglePanel(els.setPanel));
+els.posBtn.addEventListener('click', () => togglePanel(els.posPanel));
 els.useGps.addEventListener('click', startGps);
 els.manualBtn.addEventListener('click', () => {
   els.manualRow.hidden = !els.manualRow.hidden;
@@ -861,6 +925,7 @@ if ('serviceWorker' in navigator) {
 setConnected(false);
 renderPosition();
 renderEncState();
+renderMeter(null);  // draw the empty segments rather than an empty box
 audio.setEnabled(localStorage.getItem(SOUND_KEY) !== '0');
 renderSoundState();
 // Browsers will not make a sound until the user has interacted with the page.

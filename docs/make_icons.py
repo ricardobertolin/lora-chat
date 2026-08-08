@@ -1,6 +1,9 @@
-"""Generate the PWA icons: concentric radio waves on the app's dark background.
+"""Generate the PWA icons in the silvercase palette.
 
     python make_icons.py
+
+Acid-green signal arcs radiating from a square emitter, inside a hard frame -
+square corners and no anti-aliasing, matching the app's terminal look.
 
 Writes icon-192.png and icon-512.png. Pure stdlib - no Pillow needed.
 """
@@ -9,35 +12,44 @@ import math
 import struct
 import zlib
 
-BG = (11, 16, 32)
-ACCENT = (76, 141, 255)
-DOT = (232, 236, 248)
+BG = (0, 0, 0)
+ACID = (216, 255, 47)
+INK = (238, 240, 234)
 
 
 def render(size):
-    cx, cy = size / 2, size * 0.60
-    dot_r = size * 0.055
-    rings = [(0.16, 0.030), (0.26, 0.030), (0.36, 0.030)]
+    cx, cy = size / 2, size * 0.62
+    half_dot = size * 0.05          # square emitter, not a circle
+    rings = [(0.17, 0.034), (0.28, 0.034), (0.39, 0.034)]
+
+    frame_at = size * 0.055         # inset of the border
+    frame_w = max(2, round(size * 0.022))
 
     rows = []
     for y in range(size):
         row = bytearray()
         for x in range(size):
-            dx, dy = x + 0.5 - cx, y + 0.5 - cy
-            dist = math.hypot(dx, dy) / size
+            px, py = x + 0.5, y + 0.5
             colour = BG
 
-            if dist <= dot_r / size:
-                colour = DOT
+            # Hard frame: inside the inset band on any edge.
+            edge = min(px, py, size - px, size - py)
+            if frame_at <= edge < frame_at + frame_w:
+                colour = ACID
             else:
-                # Only draw the upper arc of each ring, so it reads as a signal
-                # radiating from the dot rather than a bullseye.
-                angle = math.degrees(math.atan2(-dy, dx))
-                if 30 <= angle <= 150:
-                    for radius, width in rings:
-                        if abs(dist - radius) <= width / 2:
-                            colour = ACCENT
-                            break
+                dx, dy = px - cx, py - cy
+                if abs(dx) <= half_dot and abs(dy) <= half_dot:
+                    colour = INK
+                else:
+                    # Upper arcs only, so it reads as a signal radiating from
+                    # the emitter rather than a bullseye.
+                    angle = math.degrees(math.atan2(-dy, dx))
+                    if 32 <= angle <= 148:
+                        dist = math.hypot(dx, dy) / size
+                        for radius, width in rings:
+                            if abs(dist - radius) <= width / 2:
+                                colour = ACID
+                                break
             row += bytes(colour)
         rows.append(bytes(row))
 
