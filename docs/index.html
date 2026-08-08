@@ -196,7 +196,30 @@
   }
   #banner.show { display: block; }
 
-  #posPanel, #setPanel {
+  #callBanner {
+    display: none;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
+    background: var(--accent);
+    color: #fff;
+    font-weight: 600;
+    flex: 0 0 auto;
+  }
+  #callBanner.show { display: flex; }
+  #callBanner button { background: rgba(255,255,255,.2); border-color: rgba(255,255,255,.5); color: #fff; }
+  #callBanner #answerBtn { background: #fff; color: var(--accent); }
+
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 6px 14px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .stats b { color: var(--text); }
+
+  #posPanel, #setPanel, #testPanel {
     display: none;
     flex-direction: column;
     gap: 8px;
@@ -206,7 +229,7 @@
     font-size: 13px;
     flex: 0 0 auto;
   }
-  #posPanel.show, #setPanel.show { display: flex; }
+  #posPanel.show, #setPanel.show, #testPanel.show { display: flex; }
   .prow input[type=password] {
     flex: 1 1 140px;
     font: inherit;
@@ -259,9 +282,33 @@
   <div class="spacer"></div>
   <span class="pill" id="status"><span class="dot"></span><span id="statusText">offline</span></span>
   <button id="posBtn" class="ghost" title="Position sharing">Pos</button>
+  <button id="testBtn" class="ghost" title="Link test and statistics">Test</button>
+  <button id="callBtn" class="ghost" title="Ring the other side until they answer">Call</button>
   <button id="setBtn" class="ghost" title="Encryption, history, diagnostics">Set</button>
   <button id="connect">Connect</button>
 </header>
+
+<div id="callBanner">
+  <span id="callText">Incoming call</span>
+  <button id="answerBtn" class="sm">Answer</button>
+  <button id="dismissBtn" class="ghost sm">Dismiss</button>
+</div>
+
+<div id="testPanel">
+  <div class="prow">
+    <strong>Link test</strong>
+    <span id="testState" class="muted">idle</span>
+  </div>
+  <div class="prow">
+    <label class="muted" for="testInterval">every</label>
+    <input type="text" id="testInterval" value="5" inputmode="decimal" style="flex:0 0 60px">
+    <span class="muted">s</span>
+    <button id="testStart" class="sm">Start</button>
+    <button id="testStop" class="ghost sm">Stop</button>
+    <button id="testCsv" class="ghost sm">Export CSV</button>
+  </div>
+  <div class="stats" id="testStats">no samples yet</div>
+</div>
 
 <div id="setPanel">
   <div class="prow">
@@ -275,6 +322,11 @@
   </div>
   <div class="prow muted">Both ends need the same passphrase. Sender names and
     timing stay visible; only the message text is hidden.</div>
+  <div class="prow">
+    <strong>Sound</strong>
+    <span id="soundState" class="muted"></span>
+    <button id="soundToggle" class="ghost sm">Toggle</button>
+  </div>
   <div class="prow">
     <strong>History</strong>
     <span id="histState" class="muted"></span>

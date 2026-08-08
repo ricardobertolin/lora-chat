@@ -32,6 +32,8 @@ rewritten in JavaScript.
 | `position.js` | Position encoding and great-circle maths. Also browser-free and unit-tested. |
 | `crypto.js` | AES-GCM encryption and passphrase key derivation. |
 | `history.js` | Chat history persistence and capping. |
+| `survey.js` | Probe bookkeeping, delivery ratio and link-margin maths. |
+| `audio.js` | Chirps and the ring tone, synthesised with WebAudio - no assets. |
 | `sw.js`, `manifest.webmanifest` | PWA shell, so it installs and runs offline. |
 | `serve.py` | Local dev server on localhost. |
 | `make_icons.py` | Regenerates the PNG icons. Stdlib only. |
@@ -103,6 +105,60 @@ a 40-character message goes from about 0.35 s to 0.7 s at SF9.
 The last 300 messages are kept in `localStorage` and replayed on load, below an
 `--- earlier ---` divider. **Set -> Clear** wipes them. Only real messages are
 stored; diagnostics, positions and radio chatter are not.
+
+## Link test
+
+**Test** -> **Start**. It sends `!PING n` at a fixed interval; the other app
+auto-replies `!PONG n`, and the statistics build up live:
+
+| Reported | Meaning |
+| --- | --- |
+| delivery | Replies over probes that got a verdict. In-flight probes are excluded, so the figure does not dip after every send |
+| RSSI / SNR / RTT | min, mean and max |
+| margin | **The number that matters.** SNR above the floor for the current SF |
+| distance | From shared positions, when both ends have one |
+
+**Export CSV** dumps every probe: `seq, sent_at_ms, delivered, rtt_ms, rssi_dbm,
+snr_db, sf`.
+
+### Why margin, and not RSSI
+
+Two reasons RSSI misleads at range:
+
+- **Survivor bias.** You only see RSSI for packets that *arrived*. At the edge,
+  the weak ones vanish and the average quietly improves - the link looks
+  healthiest just before it dies. Delivery ratio is the honest measure.
+- LoRa demodulates **below** the noise floor, so SNR predicts success better.
+  Each SF has a hard limit: SF7 -7.5 dB, SF9 -12.5 dB, SF12 -20 dB.
+
+`margin = SNR - floor`, and it tells you how much further you can go:
+`d2/d1 = 10^(margin / 10n)`, with *n* around 2 in free space, 3 suburban, 4+
+dense urban. The app reports that multiplier at n=3.
+
+### Making the numbers mean something
+
+- **Both antennas vertical.** Cross-polarisation can cost 20 dB, more than the
+  whole SF7-to-SF12 range.
+- **Off the ground**, waist height or higher - ground blocks the Fresnel zone.
+- **Consistent posture.** Your body absorbs 900 MHz; against your chest is
+  several dB down on held out.
+- **At least 20 probes** per point. Fading makes a single sample meaningless.
+- **Fix the power** with `/power`, or you are comparing nothing.
+
+Run the test at each `/sf` to find the fastest setting that still delivers from
+where you are.
+
+## Sound and calling
+
+A short two-note chirp on each received message; a quieter tick for probe
+replies. **Set -> Sound** toggles it, and the choice is remembered.
+
+**Call** rings the other side repeatedly until they answer, for when the phone
+is in a pocket. Their app shows an Answer banner and rings until answered or
+dismissed. **Any** message from them also ends the call - replying is answering.
+
+Browsers refuse to make noise before the first interaction with the page, so the
+audio context is unlocked on the first tap.
 
 ## Radio commands
 
@@ -188,13 +244,16 @@ from the PC - and a USB-C OTG adapter if it is USB-A on the other end.
 Working on hardware: **Web Serial** on Windows desktop and **WebUSB** on
 Android, both chatting through a Heltec V3.
 
-Unit-tested (`npm test`, 50 tests): the serial line parser against output
+Unit-tested (`npm test`, 67 tests): the serial line parser against output
 captured from real sessions, position encoding and great-circle maths,
 encryption against Node's WebCrypto (round-trip, wrong key, tampering,
-truncation, unicode), and history capping and corrupt-storage handling.
+truncation, unicode), history capping and corrupt-storage handling, and the
+survey statistics (in-flight probes excluded from delivery ratio, duplicate
+replies rejected, margin and range factor).
 
-Not covered by tests: the two transports and the DOM, which need a real browser
-and real hardware.
+Not covered by tests: the two transports, WebAudio and the DOM, which need a
+real browser. The `!PING`/`!PONG`/`!CALL` messages are confirmed to relay
+between two boards with RSSI and SNR intact.
 
 If Android ever stops enumerating the board, the CP2102 setup in `transport.js`
 (`IFC_ENABLE`, `SET_BAUDRATE`, `SET_LINE_CTL`, `SET_MHS`, per Silicon Labs

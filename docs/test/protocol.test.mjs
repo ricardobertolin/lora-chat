@@ -43,6 +43,31 @@ test('parses firmware errors', () => {
   assert.equal(parseLine('!! packet dropped, CRC mismatch').kind, 'error');
 });
 
+test('parses the firmware settings lines in all their wordings', () => {
+  for (const line of [
+    '~~ now on 915.000 MHz, SF10, BW 125.0 kHz, 14 dBm',
+    '~~ on 915.000 MHz, SF10, BW 125.0 kHz, 14 dBm',
+    '~~ back on 915.000 MHz, SF10, BW 125.0 kHz, 14 dBm',
+    '~~ link confirmed on 915.000 MHz, SF10, BW 125.0 kHz, 14 dBm',
+    '~~ other board switched us to 915.000 MHz, SF10, BW 125.0 kHz, 14 dBm',
+  ]) {
+    const r = parseLine(line);
+    assert.equal(r.kind, 'cfg', line);
+    assert.equal(r.sf, 10);
+    assert.equal(r.freq, 915);
+    assert.equal(r.bw, 125);
+    assert.equal(r.power, 14);
+  }
+});
+
+test('a negative transmit power parses', () => {
+  assert.equal(parseLine('~~ on 868.000 MHz, SF12, BW 250.0 kHz, -9 dBm').power, -9);
+});
+
+test('other tilde lines are not mistaken for settings', () => {
+  assert.equal(parseLine('~~ reverting in 30 s unless the link comes back').kind, 'system');
+});
+
 test('boot noise falls through to system', () => {
   assert.equal(parseLine('ESP-ROM:esp32s3-20210327').kind, 'system');
 });

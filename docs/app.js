@@ -12,6 +12,8 @@ import {
 } from './position.js';
 import { deriveKey, encryptMessage, decryptMessage, isEncrypted } from './crypto.js';
 import * as history from './history.js';
+import * as survey from './survey.js';
+import * as audio from './audio.js';
 import {
   pickTransport,
   describeCapabilities,
@@ -52,6 +54,21 @@ const els = {
   encState: document.getElementById('encState'),
   histState: document.getElementById('histState'),
   histClear: document.getElementById('histClear'),
+  soundState: document.getElementById('soundState'),
+  soundToggle: document.getElementById('soundToggle'),
+  testBtn: document.getElementById('testBtn'),
+  testPanel: document.getElementById('testPanel'),
+  testInterval: document.getElementById('testInterval'),
+  testStart: document.getElementById('testStart'),
+  testStop: document.getElementById('testStop'),
+  testCsv: document.getElementById('testCsv'),
+  testState: document.getElementById('testState'),
+  testStats: document.getElementById('testStats'),
+  callBtn: document.getElementById('callBtn'),
+  callBanner: document.getElementById('callBanner'),
+  callText: document.getElementById('callText'),
+  answerBtn: document.getElementById('answerBtn'),
+  dismissBtn: document.getElementById('dismissBtn'),
 };
 
 let transport = null;
@@ -78,6 +95,19 @@ const PASS_KEY = 'lora-chat-passphrase';
 let cryptoKey = null;
 
 let log = [];  // persisted chat history
+
+// Link test and calling ---------------------------------------------------
+const SOUND_KEY = 'lora-chat-sound';
+const CALL_REPEAT_MS = 4000;
+
+let currentSf = 9;         // tracked from the firmware's settings lines
+let activeSurvey = null;
+let surveyTimer = null;
+let surveyRender = null;
+let probeSeq = 0;
+
+let callTimer = null;      // we are calling out
+let ringingFrom = null;    // someone is calling us
 
 function setConnected(on) {
   els.status.classList.toggle('on', on);
@@ -195,75 +225,129 @@ function restoreHistory() {
   els.log.scrollTop = els.log.scrollHeight;
 }
 
+// Everything the app sends goes through here, so encryption and the command
+// exemption are applied in exactly one place.
+async function sendText(text) {
+  if (!transport) return false;
+  const outgoing = cryptoKey && !text.startsWith('/') ? await encryptMessage(cryptoKey, text) : text;
+  await transport.send(outgoing);
+  return true;
+}
+
+async function handleRecv(ev) {
+  lastRssi = ev.rssi;
+  updateSubtitle();
+
+  // Firmware control traffic is never encrypted - the board has to read it.
+  if (ev.text.startsWith('!CFGOK')) {
+    note(`${ev.from || 'peer'} confirmed the new radio settings`);
+    return;
+  }
+  if (ev.text.startsWith('!CFG ')) {
+    note(`${ev.from || 'peer'} changed the radio: ${ev.text.slice(5)}`);
+    return;
+  }
+
+  const who = ev.from || 'peer';
+  let text = ev.text;
+  let locked = false;
+
+  // Decrypt before classifying, so positions and probes are protected too.
+  if (isEncrypted(text)) {
+    if (!cryptoKey) {
+      note(`${who} sent an encrypted message - set the passphrase to read it`);
+      return;
+    }
+    const plain = await decryptMessage(cryptoKey, text);
+    if (plain === null) {
+      note(`could not decrypt a message from ${who} - different passphrase?`, true);
+      audio.chirpError();
+      return;
+    }
+    text = plain;
+    locked = true;
+  }
+
+  // Any traffic at all means they are there, so a call in progress is answered.
+  if (callTimer && !text.startsWith('!PING')) stopCalling(`${who} responded`);
+
+  if (text.startsWith('!PING ')) {
+    const seq = text.slice(6).trim();
+    sendText(`!PONG ${seq}`).catch(() => {});
+    return;
+  }
+  if (text.startsWith('!PONG ')) {
+    const seq = Number(text.slice(6).trim());
+    if (activeSurvey && survey.recordReply(activeSurvey, seq, {
+      rssi: ev.rssi,
+      snr: ev.snr,
+      at: Date.now(),
+    })) {
+      audio.tickProbe();
+      renderSurvey();
+    }
+    return;
+  }
+  if (text === '!CALL') {
+    startRinging(who);
+    return;
+  }
+  if (text === '!CALLOK') {
+    stopCalling(`${who} answered`);
+    return;
+  }
+
+  const pos = isPosition(text) ? decodePosition(text) : null;
+  if (pos) {
+    peers.set(who, { ...pos, at: Date.now(), rssi: ev.rssi });
+    const rel = describeRelative(myPos, pos);
+    note(`${who} is at ${pos.lat.toFixed(5)}, ${pos.lon.toFixed(5)}` +
+         (rel ? ` — ${rel} of you` : ' (set your own position to get range)'));
+    renderPosition();
+    return;
+  }
+
+  bubble({ mine: false, who: ev.from, text, rssi: ev.rssi, snr: ev.snr, locked });
+  audio.chirpReceived();
+}
+
+async function handleSent(ev) {
+  let text = ev.text;
+  let locked = false;
+  if (isEncrypted(text)) {
+    const plain = await decryptMessage(cryptoKey, text);
+    if (plain === null) {
+      note('sent an encrypted message');
+      return;
+    }
+    text = plain;
+    locked = true;
+  }
+
+  // Our own probes and control messages are not conversation.
+  if (/^!(PING|PONG|CALL|CALLOK)\b/.test(text)) return;
+  if (isPosition(text)) {
+    note(`sent position (${myPos ? myPos.source : 'unknown'})`);
+    return;
+  }
+  bubble({ mine: true, text, locked });
+}
+
 function handleLine(raw) {
   const ev = parseLine(raw);
   if (!ev) return;
 
   switch (ev.kind) {
     case 'sent':
-      if (isPosition(ev.text)) {
-        note(`sent position (${myPos ? myPos.source : 'unknown'})`);
-      } else if (isEncrypted(ev.text)) {
-        // Show what we actually sent, not the ciphertext the board echoed.
-        decryptMessage(cryptoKey, ev.text).then((plain) =>
-          plain === null
-            ? note('sent an encrypted message')
-            : bubble({ mine: true, text: plain, locked: true })
-        );
-      } else {
-        bubble({ mine: true, text: ev.text });
-      }
+      handleSent(ev);
       break;
-    case 'recv': {
-      lastRssi = ev.rssi;
-      updateSubtitle();
-
-      // Radio-settings traffic between the boards is status, not conversation.
-      if (ev.text.startsWith('!CFGOK')) {
-        note(`${ev.from || 'peer'} confirmed the new radio settings`);
-        break;
-      }
-      if (ev.text.startsWith('!CFG ')) {
-        note(`${ev.from || 'peer'} changed the radio: ${ev.text.slice(5)}`);
-        break;
-      }
-
-      if (isEncrypted(ev.text)) {
-        const who = ev.from || 'peer';
-        if (!cryptoKey) {
-          note(`${who} sent an encrypted message - set the passphrase to read it`);
-          break;
-        }
-        decryptMessage(cryptoKey, ev.text).then((plain) =>
-          plain === null
-            ? note(`could not decrypt a message from ${who} - different passphrase?`, true)
-            : bubble({
-                mine: false,
-                who: ev.from,
-                text: plain,
-                rssi: ev.rssi,
-                snr: ev.snr,
-                locked: true,
-              })
-        );
-        break;
-      }
-
-      const pos = isPosition(ev.text) ? decodePosition(ev.text) : null;
-      if (pos) {
-        const who = ev.from || 'unknown';
-        peers.set(who, { ...pos, at: Date.now(), rssi: ev.rssi });
-        const rel = describeRelative(myPos, pos);
-        note(`${who} is at ${pos.lat.toFixed(5)}, ${pos.lon.toFixed(5)}` +
-             (rel ? ` — ${rel} of you` : ' (set your own position to get range)'));
-        renderPosition();
-        break;
-      }
-      // A malformed !POS falls through and is shown as an ordinary message
-      // rather than being silently swallowed.
-      bubble({ mine: false, who: ev.from, text: ev.text, rssi: ev.rssi, snr: ev.snr });
+    case 'recv':
+      handleRecv(ev);
       break;
-    }
+    case 'cfg':
+      currentSf = ev.sf;
+      note(ev.text.replace(/^~~\s*/, ''));
+      break;
     case 'banner':
       nodeName = ev.node;
       updateSubtitle();
@@ -391,6 +475,175 @@ function toggleShare() {
   }
   renderPosition();
 }
+
+// Link test ---------------------------------------------------------------
+
+function renderSurvey() {
+  if (!activeSurvey) {
+    els.testStats.textContent = 'no samples yet';
+    return;
+  }
+  const r = survey.summarise(activeSurvey);
+  const cell = (label, value) => {
+    const d = document.createElement('div');
+    const b = document.createElement('b');
+    b.textContent = value;
+    d.appendChild(document.createTextNode(`${label} `));
+    d.appendChild(b);
+    return d;
+  };
+
+  const one = (s, unit, digits = 1) =>
+    s ? `${s.avg.toFixed(digits)}${unit} (${s.min.toFixed(digits)}..${s.max.toFixed(digits)})` : '-';
+
+  els.testStats.textContent = '';
+  els.testStats.appendChild(cell('sent', String(r.sent)));
+  els.testStats.appendChild(cell('replies', String(r.received)));
+  els.testStats.appendChild(cell('lost', String(r.lost)));
+  els.testStats.appendChild(cell('delivery', survey.formatPercent(r.pdr)));
+  els.testStats.appendChild(cell('RSSI', one(r.rssi, ' dBm', 0)));
+  els.testStats.appendChild(cell('SNR', one(r.snr, ' dB')));
+  els.testStats.appendChild(cell('RTT', one(r.rtt, ' ms', 0)));
+  els.testStats.appendChild(
+    cell(
+      `margin (SF${r.sf})`,
+      r.margin === null ? '-' : `${r.margin.toFixed(1)} dB — ~${r.rangeFactor.toFixed(1)}x further`
+    )
+  );
+  if (myPos && peers.size) {
+    const [, p] = [...peers.entries()][0];
+    els.testStats.appendChild(cell('distance', describeRelative(myPos, p) || '-'));
+  }
+}
+
+function startSurvey() {
+  if (surveyTimer) return;
+  if (!transport) {
+    note('connect a board first', true);
+    return;
+  }
+  const secs = Number(els.testInterval.value.trim().replace(',', '.'));
+  if (!Number.isFinite(secs) || secs < 1 || secs > 300) {
+    note('interval must be between 1 and 300 seconds', true);
+    return;
+  }
+  const intervalMs = secs * 1000;
+  activeSurvey = survey.createSurvey({
+    sf: currentSf,
+    intervalMs,
+    // Generous enough that a slow SF12 round trip is not scored as a loss.
+    timeoutMs: Math.max(intervalMs * 2, 12000),
+  });
+  probeSeq = 0;
+
+  const fire = () => {
+    probeSeq += 1;
+    survey.recordSent(activeSurvey, probeSeq, Date.now());
+    sendText(`!PING ${probeSeq}`).catch((err) => note(`probe failed: ${err.message}`, true));
+    renderSurvey();
+  };
+
+  fire();
+  surveyTimer = setInterval(fire, intervalMs);
+  surveyRender = setInterval(renderSurvey, 1000);  // keeps timeouts ticking over
+  els.testState.textContent = `running, every ${secs}s at SF${currentSf}`;
+  note(`link test started at SF${currentSf}, one probe every ${secs}s`);
+}
+
+function stopSurvey() {
+  if (!surveyTimer) return;
+  clearInterval(surveyTimer);
+  clearInterval(surveyRender);
+  surveyTimer = null;
+  surveyRender = null;
+
+  const r = survey.summarise(activeSurvey);
+  els.testState.textContent = 'stopped';
+  note(
+    `link test: ${r.received}/${r.received + r.lost} delivered (${survey.formatPercent(r.pdr)})` +
+      (r.snr ? `, SNR ${r.snr.avg.toFixed(1)} dB, margin ${r.margin.toFixed(1)} dB at SF${r.sf}` : '')
+  );
+  renderSurvey();
+}
+
+function exportCsv() {
+  if (!activeSurvey || !activeSurvey.probes.length) {
+    note('nothing to export yet', true);
+    return;
+  }
+  const blob = new Blob([survey.toCsv(activeSurvey)], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `lora-link-sf${activeSurvey.sf}-${Date.now()}.csv`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
+// Calling -----------------------------------------------------------------
+
+function startCalling() {
+  if (!transport) {
+    note('connect a board first', true);
+    return;
+  }
+  if (callTimer) return;
+  audio.unlock();
+  const ring = () => sendText('!CALL').catch(() => {});
+  ring();
+  callTimer = setInterval(ring, CALL_REPEAT_MS);
+  els.callBtn.textContent = 'Cancel';
+  note('calling - the other side will ring until they answer');
+}
+
+function stopCalling(reason) {
+  if (!callTimer) return;
+  clearInterval(callTimer);
+  callTimer = null;
+  els.callBtn.textContent = 'Call';
+  note(reason || 'call cancelled');
+}
+
+function startRinging(who) {
+  ringingFrom = who;
+  els.callText.textContent = `${who} is calling`;
+  els.callBanner.classList.add('show');
+  audio.startRinging();
+  note(`${who} is calling`);
+}
+
+function stopRinging(sendAck, reason) {
+  if (!ringingFrom) return;
+  audio.stopRinging();
+  els.callBanner.classList.remove('show');
+  ringingFrom = null;
+  if (sendAck) sendText('!CALLOK').catch(() => {});
+  note(reason);
+}
+
+els.testBtn.addEventListener('click', () => {
+  audio.unlock();
+  els.testPanel.classList.toggle('show');
+});
+els.testStart.addEventListener('click', startSurvey);
+els.testStop.addEventListener('click', stopSurvey);
+els.testCsv.addEventListener('click', exportCsv);
+els.callBtn.addEventListener('click', () =>
+  callTimer ? stopCalling('call cancelled') : startCalling()
+);
+els.answerBtn.addEventListener('click', () => stopRinging(true, 'answered'));
+els.dismissBtn.addEventListener('click', () => stopRinging(false, 'call dismissed'));
+
+function renderSoundState() {
+  els.soundState.textContent = audio.isEnabled() ? 'on' : 'off';
+}
+
+els.soundToggle.addEventListener('click', () => {
+  const next = !audio.isEnabled();
+  audio.setEnabled(next);
+  localStorage.setItem(SOUND_KEY, next ? '1' : '0');
+  renderSoundState();
+  if (next) audio.chirpReceived();
+});
 
 // Encryption and history controls ----------------------------------------
 
@@ -543,13 +796,9 @@ els.form.addEventListener('submit', async (e) => {
   if (!text || !transport) return;
   els.input.value = '';
   try {
-    // Commands are for the board itself and must not be encrypted, or it would
-    // never recognise them.
-    const outgoing =
-      cryptoKey && !text.startsWith('/') ? await encryptMessage(cryptoKey, text) : text;
     // No local echo: the board echoes every accepted line back as ">> ...", so
     // what appears in the log is what actually went out over the air.
-    await transport.send(outgoing);
+    await sendText(text);
   } catch (err) {
     note(`send failed: ${err && err.message ? err.message : err}`, true);
   }
@@ -612,6 +861,10 @@ if ('serviceWorker' in navigator) {
 setConnected(false);
 renderPosition();
 renderEncState();
+audio.setEnabled(localStorage.getItem(SOUND_KEY) !== '0');
+renderSoundState();
+// Browsers will not make a sound until the user has interacted with the page.
+document.addEventListener('pointerdown', () => audio.unlock(), { once: true });
 restoreHistory();
 
 // A stored passphrase means encryption stays on across reloads.

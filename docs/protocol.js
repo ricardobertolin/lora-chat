@@ -10,6 +10,10 @@
 
 const BANNER_RE = /^===\s*LoRa chat - this board is "(.+)"\s*===$/;
 const RADIO_RE = /^on\s+([\d.]+)\s+MHz,\s+SF(\d+)\./;
+// The firmware reports settings on a "~~" line after any change or /status:
+//   ~~ now on 915.000 MHz, SF10, BW 125.0 kHz, 14 dBm
+// Tracking these is what lets the app compute link margin for the current SF.
+const CFG_RE = /^~~\s+.*?([\d.]+)\s+MHz,\s+SF(\d+),\s+BW\s+([\d.]+)\s+kHz,\s+(-?\d+)\s+dBm/;
 // Greedy payload plus an anchored tail, so a message containing "  (RSSI" of
 // its own still splits at the real suffix the firmware appended.
 const RECV_RE = /^<<\s(.*)\s{2}\(RSSI\s(-?[\d.]+)\sdBm,\sSNR\s(-?[\d.]+)\sdB\)$/;
@@ -29,6 +33,18 @@ export function parseLine(raw) {
       kind: 'radio',
       freq: parseFloat(radio[1]),
       sf: parseInt(radio[2], 10),
+      text: line,
+    };
+  }
+
+  const cfgLine = CFG_RE.exec(line);
+  if (cfgLine) {
+    return {
+      kind: 'cfg',
+      freq: parseFloat(cfgLine[1]),
+      sf: parseInt(cfgLine[2], 10),
+      bw: parseFloat(cfgLine[3]),
+      power: parseInt(cfgLine[4], 10),
       text: line,
     };
   }
