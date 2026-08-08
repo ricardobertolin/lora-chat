@@ -145,10 +145,15 @@ from the PC - and a USB-C OTG adapter if it is USB-A on the other end.
 
 ## Status
 
-Unit-tested: the line parser, against output captured from real COM4/COM6
-sessions (`node --test test/`).
+Working on hardware: **Web Serial** on Windows desktop and **WebUSB** on
+Android, both chatting through a Heltec V3.
 
-Not yet verified on hardware: the Web Serial and WebUSB connect paths, which
-need a real browser and a real phone. The CP2102 setup in `transport.js`
-(`IFC_ENABLE`, `SET_BAUDRATE`, `SET_LINE_CTL`, `SET_MHS`) follows Silicon Labs
-AN571 but is the most likely place to need iteration on Android.
+Unit-tested (`npm test`, 26 tests): the serial line parser against output
+captured from real sessions, and the position encoding and great-circle maths.
+
+Not covered by tests: the two transports and the DOM, which need a real browser
+and real hardware.
+
+If Android ever stops enumerating the board, the CP2102 setup in `transport.js`
+(`IFC_ENABLE`, `SET_BAUDRATE`, `SET_LINE_CTL`, `SET_MHS`, per Silicon Labs
+AN571) is the place to look - but check the cable first.
