@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>LoRa Chat</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0b1020">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+  :root {
+    --bg: #0b1020;
+    --panel: #141a2e;
+    --panel-2: #1c2540;
+    --line: #2a3557;
+    --text: #e8ecf8;
+    --muted: #8e9ac0;
+    --accent: #4c8dff;
+    --good: #3ecf8e;
+    --fair: #f5b342;
+    --weak: #ff5c5c;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f4f6fc;
+      --panel: #ffffff;
+      --panel-2: #eef1f9;
+      --line: #d9e0f0;
+      --text: #131a2c;
+      --muted: #5d6a8c;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    height: 100%;
+    margin: 0;
+  }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: flex;
+    flex-direction: column;
+    /* Keeps the composer clear of the Android gesture bar. */
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+    flex: 0 0 auto;
+  }
+  .title { font-weight: 650; letter-spacing: .2px; }
+  .title small {
+    display: block;
+    font-weight: 400;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .spacer { flex: 1; }
+
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: var(--panel-2);
+    color: var(--muted);
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--muted);
+  }
+  .pill.on .dot { background: var(--good); }
+  .pill.on { color: var(--text); }
+
+  button {
+    font: inherit;
+    font-size: 14px;
+    padding: 9px 16px;
+    border-radius: 10px;
+    border: 1px solid transparent;
+    background: var(--accent);
+    color: #fff;
+    cursor: pointer;
+    min-height: 40px;
+  }
+  button.ghost {
+    background: transparent;
+    border-color: var(--line);
+    color: var(--text);
+  }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+
+  #log {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .msg {
+    max-width: min(78%, 560px);
+    padding: 8px 12px;
+    border-radius: 14px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    word-wrap: break-word;
+    overflow-wrap: anywhere;
+  }
+  .msg.sent {
+    align-self: flex-end;
+    background: var(--accent);
+    border-color: transparent;
+    color: #fff;
+    border-bottom-right-radius: 4px;
+  }
+  .msg.recv { align-self: flex-start; border-bottom-left-radius: 4px; }
+  .meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    color: var(--muted);
+    margin-bottom: 2px;
+  }
+  .msg.sent .meta { color: rgba(255,255,255,.8); justify-content: flex-end; }
+  .who { font-weight: 650; }
+
+  .sig {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .sig::before {
+    content: "";
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--muted);
+  }
+  .sig.good::before { background: var(--good); }
+  .sig.fair::before { background: var(--fair); }
+  .sig.weak::before { background: var(--weak); }
+
+  .note {
+    align-self: center;
+    text-align: center;
+    font-size: 12px;
+    color: var(--muted);
+    max-width: 90%;
+    overflow-wrap: anywhere;
+  }
+  .note.err { color: var(--weak); }
+
+  form {
+    display: flex;
+    gap: 8px;
+    padding: 10px 12px;
+    background: var(--panel);
+    border-top: 1px solid var(--line);
+    flex: 0 0 auto;
+  }
+  input[type=text] {
+    flex: 1;
+    font: inherit;
+    font-size: 16px; /* keeps iOS/Android from zooming on focus */
+    padding: 10px 14px;
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    background: var(--panel-2);
+    color: var(--text);
+    min-width: 0;
+  }
+  input[type=text]:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+  #banner {
+    padding: 10px 14px;
+    background: var(--panel-2);
+    border-bottom: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 13px;
+    display: none;
+  }
+  #banner.show { display: block; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="title">
+    LoRa Chat
+    <small id="sub">not connected</small>
+  </div>
+  <div class="spacer"></div>
+  <span class="pill" id="status"><span class="dot"></span><span id="statusText">offline</span></span>
+  <button id="connect">Connect</button>
+</header>
+
+<div id="banner"></div>
+
+<div id="log" role="log" aria-live="polite"></div>
+
+<form id="composer">
+  <input type="text" id="input" placeholder="Connect a board to start" autocomplete="off"
+         autocapitalize="sentences" enterkeyhint="send" disabled>
+  <button type="submit" id="send" disabled>Send</button>
+</form>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
