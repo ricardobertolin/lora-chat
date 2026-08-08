@@ -1,10 +1,14 @@
 // Cache-first app shell, so the page keeps working with no internet once it has
 // been loaded once. Bump CACHE when you change any of the files below.
-const CACHE = 'lora-chat-v11';
+// Keep this version in step with VERSION in version.js - test/version.test.mjs
+// checks it. Reusing a cache name across releases leaves installed copies
+// serving the previous build forever.
+const CACHE = 'lora-chat-0.12.0';
 const SHELL = [
   './',
   'index.html',
   'app.js',
+  'version.js',
   'protocol.js',
   'transport.js',
   'position.js',

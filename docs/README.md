@@ -21,6 +21,18 @@ Firefox and Safari support neither API on any platform.
 UTF-8 at 115200, which is exactly what this consumes - the app is `chat.py`
 rewritten in JavaScript.
 
+## Version
+
+The running build reports itself next to the title in the header, and in the
+diagnostics line. If your phone shows an older number than your desktop after a
+push, its service worker has not updated yet - reload once.
+
+**On every change: bump `VERSION` in `version.js` and the matching `CACHE` name
+in `sw.js`.** They live in two files that cannot import each other - one is a
+module, the other a service worker - so `test/version.test.mjs` fails the build
+if they drift. Reusing a cache name across releases leaves installed copies
+serving the old build forever.
+
 ## Files
 
 | Path | What it is |
@@ -37,6 +49,7 @@ rewritten in JavaScript.
 | `presence.js` | Who is on the channel, and when they went quiet. |
 | `radar.js` | Ring scaling and the north-up projection for the radar. |
 | `theme.js` | The accent colour, shared between CSS, canvas and WebGL. |
+| `version.js` | The version string. Bump it, and `CACHE` in `sw.js`, on every change. |
 | `fragment.js` | Splits a blob across packets and reassembles it, with resend requests. |
 | `media.js` | Dithering, ADPCM, and the LoRa airtime formula. |
 | `backdrop.js` | The wireframe backdrop. Binds to the UI by observation, so app.js does not know it exists. |

@@ -19,7 +19,8 @@ import * as frag from './fragment.js';
 import * as media from './media.js';
 import * as presence from './presence.js';
 import { drawRadar } from './radar.js';
-import { applyAccent, readAccent, normaliseHex, DEFAULT_ACCENT } from './theme.js';
+import { applyAccent, readAccent } from './theme.js';
+import { VERSION } from './version.js';
 import {
   pickTransport,
   describeCapabilities,
@@ -63,6 +64,7 @@ const els = {
   histKeep: document.getElementById('histKeep'),
   accentIn: document.getElementById('accentIn'),
   radar: document.getElementById('radar'),
+  ver: document.getElementById('ver'),
   soundState: document.getElementById('soundState'),
   soundToggle: document.getElementById('soundToggle'),
   testBtn: document.getElementById('testBtn'),
@@ -1438,7 +1440,7 @@ els.form.addEventListener('submit', async (e) => {
 els.diag.addEventListener('click', async () => {
   const caps = describeCapabilities();
   note(
-    `diagnostics — ${caps.chosen} · Web Serial ${caps.webSerial ? 'yes' : 'no'}` +
+    `diagnostics — app v${VERSION} · ${caps.chosen} · Web Serial ${caps.webSerial ? 'yes' : 'no'}` +
       ` · WebUSB ${caps.webUsb ? 'yes' : 'no'} · secure ${caps.secureContext}` +
       ` · android ${caps.android}`
   );
@@ -1487,6 +1489,10 @@ if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   });
 }
+
+// The markup carries a fallback so the version is visible even if the module
+// fails; this makes the running build the one that reports itself.
+els.ver.textContent = `v${VERSION}`;
 
 setAccent(readAccent(), { persist: false });
 keepHistory = localStorage.getItem(HISTORY_KEEP_KEY) !== '0';
