@@ -22,6 +22,8 @@ import { drawRadar } from './radar.js';
 import { applyAccent, readAccent } from './theme.js';
 import { VERSION } from './version.js';
 import * as channel from './channel.js';
+import * as msg from './messaging.js';
+import * as outbox from './outbox.js';
 import { paintFavicon } from './favicon.js';
 import qrcode from './vendor/qrcode.js';
 import {
@@ -81,6 +83,11 @@ const els = {
   scanBox: document.getElementById('scanBox'),
   scanVideo: document.getElementById('scanVideo'),
   scanStop: document.getElementById('scanStop'),
+  nickIn: document.getElementById('nickIn'),
+  nickSave: document.getElementById('nickSave'),
+  outState: document.getElementById('outState'),
+  outClear: document.getElementById('outClear'),
+  outCount: document.getElementById('outCount'),
   soundState: document.getElementById('soundState'),
   soundToggle: document.getElementById('soundToggle'),
   testBtn: document.getElementById('testBtn'),
@@ -138,6 +145,17 @@ let helloTimer = null;
 const HISTORY_KEEP_KEY = 'lora-chat-keep-history';
 let keepHistory = true;
 
+// Delivery and the outbox -------------------------------------------------
+// A message unacknowledged after this is treated as lost. Generous, because at
+// SF12 a round trip is several seconds before anyone has typed a reply.
+const ACK_TIMEOUT_MS = 25000;
+const NICK_KEY = 'lora-chat-nick';
+
+let myNick = null;
+let msgSeq = 0;
+const pendingAcks = new Map();   // seq -> { el, timer, text }
+let queued = [];                 // outbox, persisted
+
 // Encryption --------------------------------------------------------------
 // The passphrase is kept in localStorage so the app is usable across reloads.
 // That means anyone with the unlocked device can read it - the threat this
@@ -189,9 +207,11 @@ function setConnected(on) {
   els.statusText.textContent = on ? 'connected' : 'offline';
   els.connect.textContent = on ? 'Disconnect' : 'Connect';
   els.connect.classList.toggle('ghost', on);
-  els.input.disabled = !on;
-  els.send.disabled = !on;
-  els.input.placeholder = on ? 'Type a message' : 'Connect a board to start';
+  // The composer stays usable while disconnected - what you type is queued in
+  // the outbox and goes out when a board is attached.
+  els.input.disabled = false;
+  els.send.disabled = false;
+  els.input.placeholder = on ? 'Type a message' : 'Not connected - messages will be queued';
   if (on) els.input.focus();
   updateSubtitle();
 }
@@ -220,11 +240,11 @@ function note(text, isError = false) {
   append(d);
 }
 
-function bubble({ mine, who, text, rssi, snr, locked, at, persist = true }) {
+function bubble({ mine, who, text, rssi, snr, locked, status, at, persist = true }) {
   const wrap = document.createElement('div');
   wrap.className = 'msg ' + (mine ? 'sent' : 'recv');
 
-  if (who || rssi !== undefined || locked) {
+  if (who || rssi !== undefined || locked || status) {
     const meta = document.createElement('div');
     meta.className = 'meta';
     if (who) {
@@ -236,9 +256,16 @@ function bubble({ mine, who, text, rssi, snr, locked, at, persist = true }) {
     if (locked) {
       const l = document.createElement('span');
       l.className = 'lock';
-      l.textContent = '🔒';
+      l.textContent = 'enc';
       l.title = 'encrypted in transit';
       meta.appendChild(l);
+    }
+    if (status) {
+      const s = document.createElement('span');
+      s.className = 'ack';
+      s.dataset.state = status;
+      s.textContent = status;
+      meta.appendChild(s);
     }
     if (rssi !== undefined && rssi !== null) {
       const s = document.createElement('span');
@@ -253,6 +280,7 @@ function bubble({ mine, who, text, rssi, snr, locked, at, persist = true }) {
   body.textContent = text;
   wrap.appendChild(body);
   append(wrap);
+  wrap.dataset.text = text;
 
   if (persist && keepHistory) {
     log = history.appendEntry(log, {
@@ -362,7 +390,15 @@ async function handleRecv(ev) {
   }
   if (seen !== 'seen') renderPosition();
 
-  if (text === '!HI') return;   // the announce itself carries no other meaning
+  const hello = msg.decodeHello(text);
+  if (hello) {
+    const node = nodes.get(who);
+    if (node && node.nick !== hello.nick) {
+      node.nick = hello.nick;
+      renderPosition();
+    }
+    return;
+  }
   if (text === '!BYE') {
     presence.dropNode(nodes, who);
     note(`${who} left the channel`);
@@ -409,13 +445,30 @@ async function handleRecv(ev) {
     presence.setPosition(nodes, who, pos, Date.now());
     const rel = describeRelative(myPos, pos);
     note(`${who} is at ${pos.lat.toFixed(5)}, ${pos.lon.toFixed(5)}` +
-         (rel ? ` — ${rel} of you` : ' (set your own position to get range)'));
+         (rel ? ` - ${rel} of you` : ' (set your own position to get range)'));
     renderPosition();
     return;
   }
 
-  bubble({ mine: false, who: ev.from, text, rssi: ev.rssi, snr: ev.snr, locked });
+  const ack = msg.decodeAck(text);
+  if (ack) {
+    if (ack.to === nodeName) resolveAck(ack.seq);
+    return;
+  }
+
+  // A sequenced chat message: show it, then confirm receipt.
+  const chat = msg.decodeMessage(text);
+  const shown = chat ? chat.text : text;
+  bubble({
+    mine: false,
+    who: msg.displayName(nodes.get(who)),
+    text: shown,
+    rssi: ev.rssi,
+    snr: ev.snr,
+    locked,
+  });
   audio.chirpReceived();
+  if (chat) sendText(msg.encodeAck(who, chat.seq)).catch(() => {});
 }
 
 async function handleSent(ev) {
@@ -441,8 +494,9 @@ async function handleSent(ev) {
     locked = true;
   }
 
-  // Our own probes and control messages are not conversation.
-  if (/^!(PING|PONG|CALL|CALLOK)\b/.test(text)) return;
+  // Our own control traffic is not conversation, and chat echoes are already
+  // on screen from sendChat - re-rendering them would duplicate every message.
+  if (/^!(PING|PONG|CALL|CALLOK|CALLNO|ACK|HI|BYE|M\d)/.test(text)) return;
   if (isPosition(text)) {
     note(`sent position (${myPos ? myPos.source : 'unknown'})`);
     return;
@@ -471,12 +525,12 @@ function handleLine(raw) {
     case 'banner':
       nodeName = ev.node;
       updateSubtitle();
-      note(`board ready — this node is ${ev.node}`);
+      note(`board ready - this node is ${ev.node}`);
       break;
     case 'radio':
       currentSf = ev.sf;
       currentFreq = ev.freq;
-      els.banner.textContent = `${ev.freq} MHz · SF${ev.sf} — the other board must match`;
+      els.banner.textContent = `${ev.freq} MHz · SF${ev.sf} - the other board must match`;
       els.banner.classList.add('show');
       break;
     case 'error':
@@ -509,6 +563,9 @@ function renderPosition() {
       const who = document.createElement('b');
       who.textContent = node.name;
       row.appendChild(who);
+
+      who.textContent = msg.displayName(node);
+      if (node.nick) row.title = node.name;   // the MAC name, on hover
 
       const bits = [node.stale ? 'quiet' : 'here', presence.formatSeen(node, now)];
       if (node.rssi !== null) bits.push(`${node.rssi} dBm`);
@@ -1082,7 +1139,7 @@ function renderSurvey() {
   els.testStats.appendChild(
     cell(
       `margin (SF${r.sf})`,
-      r.margin === null ? '-' : `${r.margin.toFixed(1)} dB — ~${r.rangeFactor.toFixed(1)}x further`
+      r.margin === null ? '-' : `${r.margin.toFixed(1)} dB - ~${r.rangeFactor.toFixed(1)}x further`
     )
   );
   const withPos = [...nodes.values()].find((n) => n.pos);
@@ -1163,6 +1220,11 @@ function startCalling() {
     return;
   }
   if (callTimer) return;
+  // Calling rings insistently at the other end until answered, and the button
+  // sits between two others - too easy to set off by accident.
+  if (!window.confirm('Call the other side?\n\nTheir device will ring until they answer or dismiss it.')) {
+    return;
+  }
   audio.unlock();
   const ring = () => sendText('!CALL').catch(() => {});
   ring();
@@ -1243,6 +1305,83 @@ els.soundToggle.addEventListener('click', () => {
   renderSoundState();
   if (next) audio.chirpReceived();
 });
+
+// Delivery tracking and the outbox ----------------------------------------
+
+function setBubbleStatus(el, state) {
+  const tag = el?.querySelector('.ack');
+  if (!tag) return;
+  tag.dataset.state = state;
+  tag.textContent = state;
+}
+
+function renderOutbox() {
+  els.outState.textContent = outbox.describe(queued);
+  els.outCount.textContent = queued.length ? String(queued.length) : '';
+  els.outCount.hidden = !queued.length;
+}
+
+function queueMessage(text, why) {
+  queued = outbox.enqueue(queued, outbox.createItem(text));
+  outbox.save(queued);
+  renderOutbox();
+  note(`${why} - held in the outbox (${queued.length})`);
+}
+
+// Sends one chat message with a sequence number and starts its delivery clock.
+async function sendChat(text) {
+  const seq = ++msgSeq;
+  const el = bubble({ mine: true, text, locked: !!cryptoKey, status: 'sending' });
+
+  try {
+    await sendText(msg.encodeMessage(seq, text));
+  } catch (err) {
+    setBubbleStatus(el, 'failed');
+    queueMessage(text, `send failed: ${err.message}`);
+    return;
+  }
+
+  setBubbleStatus(el, 'sent');
+  pendingAcks.set(seq, {
+    el,
+    text,
+    timer: setTimeout(() => {
+      pendingAcks.delete(seq);
+      setBubbleStatus(el, 'no ack');
+      queueMessage(text, 'no acknowledgement');
+    }, ACK_TIMEOUT_MS),
+  });
+}
+
+function resolveAck(seq) {
+  const pending = pendingAcks.get(seq);
+  if (!pending) return;
+  clearTimeout(pending.timer);
+  pendingAcks.delete(seq);
+  setBubbleStatus(pending.el, 'delivered');
+}
+
+// Flushed one at a time and paced, so a backlog does not overrun the board's
+// serial buffer the way an unthrottled media transfer would.
+let flushing = false;
+async function flushOutbox() {
+  if (flushing || !transport || !queued.length) return;
+  flushing = true;
+  note(`sending ${queued.length} queued message${queued.length === 1 ? '' : 's'}`);
+
+  try {
+    while (queued.length && transport) {
+      const item = queued[0];
+      queued = outbox.remove(queued, item.id);
+      outbox.save(queued);
+      renderOutbox();
+      await sendChat(item.text);
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+  } finally {
+    flushing = false;
+  }
+}
 
 // Channel sharing ---------------------------------------------------------
 
@@ -1436,6 +1575,24 @@ els.histClear.addEventListener('click', () => {
   note('history cleared');
 });
 
+els.nickSave.addEventListener('click', () => {
+  const clean = msg.cleanNick(els.nickIn.value);
+  myNick = clean;
+  if (clean) localStorage.setItem(NICK_KEY, clean);
+  else localStorage.removeItem(NICK_KEY);
+  els.nickIn.value = clean || '';
+  note(clean ? `you are now "${clean}"` : 'nickname cleared');
+  // Announce immediately rather than waiting for the next heartbeat.
+  if (transport) announce(msg.encodeHello(myNick));
+});
+
+els.outClear.addEventListener('click', () => {
+  outbox.clear();
+  queued = [];
+  renderOutbox();
+  note('outbox cleared');
+});
+
 els.histKeep.addEventListener('click', () => {
   keepHistory = !keepHistory;
   localStorage.setItem(HISTORY_KEEP_KEY, keepHistory ? '1' : '0');
@@ -1525,11 +1682,14 @@ function announce(what) {
 }
 
 function startPresence() {
-  announce('!HI');
+  // The nickname rides on the announcement rather than a message of its own,
+  // so a late arrival learns names without extra airtime.
+  const hello = () => announce(msg.encodeHello(myNick));
+  hello();
   clearInterval(helloTimer);
   // Cheap enough to be invisible on air, often enough that a node arriving
   // mid-session learns about everyone within a couple of minutes.
-  helloTimer = setInterval(() => announce('!HI'), HELLO_INTERVAL_MS);
+  helloTimer = setInterval(hello, HELLO_INTERVAL_MS);
 }
 
 function stopPresence(sayGoodbye) {
@@ -1545,7 +1705,7 @@ async function connect() {
   const Transport = pickTransport();
   if (!Transport) {
     note(
-      'This browser has neither Web Serial nor WebUSB. Use Chrome or Edge — ' +
+      'This browser has neither Web Serial nor WebUSB. Use Chrome or Edge - ' +
         'Firefox and Safari do not support either.',
       true
     );
@@ -1565,8 +1725,12 @@ async function connect() {
     });
     setConnected(true);
     note(`connected over ${Transport.label}`);
-    // Give the board a moment to finish booting before announcing ourselves.
-    setTimeout(startPresence, 3000);
+    // Give the board a moment to finish booting before announcing ourselves,
+    // then send anything that piled up while there was no radio.
+    setTimeout(() => {
+      startPresence();
+      flushOutbox();
+    }, 3000);
   } catch (err) {
     transport = null;
     // Dismissing the browser's device picker lands here too, which is not worth
@@ -1601,14 +1765,24 @@ els.connect.addEventListener('click', () => (transport ? disconnect() : connect(
 els.form.addEventListener('submit', async (e) => {
   e.preventDefault();
   const text = els.input.value.trim();
-  if (!text || !transport) return;
+  if (!text) return;
   els.input.value = '';
-  try {
-    // No local echo: the board echoes every accepted line back as ">> ...", so
-    // what appears in the log is what actually went out over the air.
-    await sendText(text);
-  } catch (err) {
-    note(`send failed: ${err && err.message ? err.message : err}`, true);
+
+  // Commands go straight to the board and are not conversation.
+  if (text.startsWith('/')) {
+    try {
+      await sendText(text);
+    } catch (err) {
+      note(`command failed: ${err && err.message ? err.message : err}`, true);
+    }
+    els.input.focus();
+    return;
+  }
+
+  if (!transport) {
+    queueMessage(text, 'not connected');
+  } else {
+    await sendChat(text);
   }
   els.input.focus();
 });
@@ -1616,7 +1790,7 @@ els.form.addEventListener('submit', async (e) => {
 els.diag.addEventListener('click', async () => {
   const caps = describeCapabilities();
   note(
-    `diagnostics — app v${VERSION} · ${caps.chosen} · Web Serial ${caps.webSerial ? 'yes' : 'no'}` +
+    `diagnostics - app v${VERSION} · ${caps.chosen} · Web Serial ${caps.webSerial ? 'yes' : 'no'}` +
       ` · WebUSB ${caps.webUsb ? 'yes' : 'no'} · secure ${caps.secureContext}` +
       ` · android ${caps.android}`
   );
@@ -1629,10 +1803,10 @@ els.diag.addEventListener('click', async () => {
   }
 
   if (!caps.webUsb) return;
-  note('pick ANY device in the next dialog — this shows what the phone can see');
+  note('pick ANY device in the next dialog - this shows what the phone can see');
   try {
     const d = await probeAnyUsbDevice();
-    note(`phone sees: ${d.name} — VID ${d.vendorId}, PID ${d.productId}`);
+    note(`phone sees: ${d.name} - VID ${d.vendorId}, PID ${d.productId}`);
     if (d.vendorId !== '0x10c4') {
       note('that is not the CP2102 (expected VID 0x10c4, PID 0xea60)', true);
     }
@@ -1640,7 +1814,7 @@ els.diag.addEventListener('click', async () => {
     if (err && err.name === 'NotFoundError') {
       note(
         'the picker was empty or dismissed. If empty, the phone sees no USB device ' +
-          'at all — almost always a charge-only cable, or the phone not doing USB host.',
+          'at all - almost always a charge-only cable, or the phone not doing USB host.',
         true
       );
     } else {
@@ -1654,7 +1828,7 @@ const caps = describeCapabilities();
 if (!caps.webSerial && !caps.webUsb) {
   note('Web Serial and WebUSB are both unavailable in this browser. Use Chrome.', true);
 } else {
-  note(`ready — will connect over ${caps.chosen}`);
+  note(`ready - will connect over ${caps.chosen}`);
   if (caps.chosen === 'WebUSB') {
     note('Plug the board in with a USB-C data cable (charge-only cables will not work).');
   }
@@ -1721,6 +1895,11 @@ els.ver.textContent = `v${VERSION}`;
 
 setAccent(readAccent(), { persist: false });
 keepHistory = localStorage.getItem(HISTORY_KEEP_KEY) !== '0';
+
+myNick = msg.cleanNick(localStorage.getItem(NICK_KEY));
+els.nickIn.value = myNick || '';
+queued = outbox.load();
+renderOutbox();
 
 setConnected(false);
 renderPosition();

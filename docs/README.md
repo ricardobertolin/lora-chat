@@ -55,6 +55,8 @@ serving the old build forever.
 | `audio.js` | Chirps and the ring tone, synthesised with WebAudio - no assets. |
 | `presence.js` | Who is on the channel, and when they went quiet. |
 | `radar.js` | Ring scaling and the north-up projection for the radar. |
+| `messaging.js` | Sequence numbers, acknowledgements and nicknames. |
+| `outbox.js` | Messages waiting for a radio, persisted. |
 | `theme.js` | The accent colour, shared between CSS, canvas and WebGL. |
 | `version.js` | The version string. Bump it, and `CACHE` in `sw.js`, on every change. |
 | `fragment.js` | Splits a blob across packets and reassembles it, with resend requests. |
@@ -145,6 +147,33 @@ Three departures from the original design, all so it survives the field:
 `vendor/three.module.min.js` is 670 kB, which dominates the install size. It is
 cached once and never fetched again, but if that matters more than the backdrop,
 delete `backdrop.js` and its `<script>` tag - nothing else references it.
+
+## Nicknames, delivery and the outbox
+
+**Set -> Nickname** replaces `8424` with a name, everywhere: chat, roster and
+radar. It travels on the presence announcement rather than a message of its own,
+so it costs no extra airtime and a late arrival learns it within two minutes.
+The MAC-derived name stays available on hover, since that is what identifies the
+board.
+
+Every message carries a sequence number and gets a status in its header:
+
+| Status | Meaning |
+| --- | --- |
+| `sending` | Handed to the board |
+| `sent` | On the air |
+| `delivered` | The other end acknowledged it |
+| `no ack` | Nothing came back within 25 seconds |
+| `failed` | The board would not take it |
+
+Acknowledgements name the **original sender**, not the acknowledger - on a
+broadcast channel an unaddressed ack becomes ambiguous the moment a third node
+joins.
+
+Anything that fails, goes unacknowledged, or is typed while disconnected lands
+in the **outbox** and is sent when a board is attached. The composer therefore
+stays usable offline. The count sits on the **Set** button; the queue survives a
+reload, and holds 50 messages, dropping the oldest rather than refusing new ones.
 
 ## Sharing a channel
 
@@ -273,8 +302,9 @@ where you are.
 A short two-note chirp on each received message; a quieter tick for probe
 replies. **Set -> Sound** toggles it, and the choice is remembered.
 
-**Call** rings the other side repeatedly until they answer, for when the phone
-is in a pocket. Their app shows an Answer banner and rings until answered or
+**Call** asks for confirmation first - it rings insistently at the other end and
+the button sits between two others - then rings repeatedly until they answer,
+for when the phone is in a pocket. Their app shows an Answer banner and rings until answered or
 dismissed. **Any** message from them also ends the call - replying is answering.
 
 Answer and Dismiss both reply over the air (`!CALLOK` / `!CALLNO`) so the caller

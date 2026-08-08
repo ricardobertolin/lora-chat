@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -177,7 +177,26 @@
   .msg.sent .meta { justify-content: flex-end; color: #55584f; border-color: #b9bcb2; }
   .who { color: var(--acid); }
   .msg.sent .who { color: #000; }
-  .lock { font-size: 11px; }
+  .lock, .ack {
+    font-size: 10px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    padding: 1px 4px;
+    border: 1px solid currentColor;
+  }
+  .ack[data-state="delivered"] { color: var(--acid); }
+  .msg.sent .ack[data-state="delivered"] { color: #3f6b00; }
+  .ack[data-state="no ack"], .ack[data-state="failed"] { color: var(--red); }
+
+  #outCount {
+    display: inline-block;
+    margin-left: 4px;
+    padding: 0 4px;
+    background: var(--red);
+    color: #fff;
+    font-size: 10px;
+    vertical-align: super;
+  }
 
   .sig { display: inline-flex; align-items: center; gap: 5px; }
   .sig::before {
@@ -544,7 +563,7 @@
 
 <header>
   <div class="title">
-    <span>LoRa Chat <i id="ver">v0.13.0</i></span>
+    <span>LoRa Chat <i id="ver">v0.14.0</i></span>
     <small id="sub">not connected</small>
   </div>
   <div class="spacer"></div>
@@ -554,7 +573,7 @@
     <button id="testBtn" class="ghost" title="Link test and statistics">Test</button>
     <button id="mediaBtn" class="ghost" title="Send an image or audio">Med</button>
     <button id="callBtn" class="ghost" title="Ring the other side until they answer">Call</button>
-    <button id="setBtn" class="ghost" title="Encryption, sound, history, diagnostics">Set</button>
+    <button id="setBtn" class="ghost" title="Nickname, channel, encryption, history">Set<sup id="outCount" hidden></sup></button>
     <button id="connect">Connect</button>
   </nav>
 </header>
@@ -658,6 +677,16 @@
   </div>
   <div class="prow hint">Both ends need the same passphrase. Sender names and
     timing stay visible; only the message text is hidden.</div>
+  <div class="prow">
+    <strong>Nickname</strong>
+    <input type="text" id="nickIn" placeholder="how others see you" maxlength="16" autocomplete="off">
+    <button id="nickSave" class="sm">Save</button>
+  </div>
+  <div class="prow">
+    <strong>Outbox</strong>
+    <span id="outState" class="muted">empty</span>
+    <button id="outClear" class="ghost sm">Clear</button>
+  </div>
   <div class="prow">
     <strong>Channel</strong>
     <button id="shareBtn2" class="ghost sm">Share setup</button>
