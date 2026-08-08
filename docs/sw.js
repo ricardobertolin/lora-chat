@@ -1,6 +1,6 @@
 // Cache-first app shell, so the page keeps working with no internet once it has
 // been loaded once. Bump CACHE when you change any of the files below.
-const CACHE = 'lora-chat-v1';
+const CACHE = 'lora-chat-v2';
 const SHELL = [
   './',
   'index.html',

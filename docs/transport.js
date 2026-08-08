@@ -197,13 +197,56 @@ export class WebUsbCp210xTransport {
   }
 }
 
-// Web Serial first: on desktop it rides the existing CP210x driver, while
+const isAndroid = () =>
+  typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent || '');
+
+// Web Serial first on desktop: it rides the existing CP210x driver, while
 // WebUSB there would need the driver swapped for WinUSB and would break
-// flash.ps1. Android has only WebUSB, so it falls through to that.
+// flash.ps1.
+//
+// Android is checked first and pinned to WebUSB. Chrome on Android can expose a
+// navigator.serial object that never enumerates anything, and picking it would
+// pop an empty port chooser instead of the working WebUSB path.
 export function pickTransport() {
+  if (isAndroid() && WebUsbCp210xTransport.supported) return WebUsbCp210xTransport;
   if (WebSerialTransport.supported) return WebSerialTransport;
   if (WebUsbCp210xTransport.supported) return WebUsbCp210xTransport;
   return null;
+}
+
+export function describeCapabilities() {
+  const chosen = pickTransport();
+  return {
+    android: isAndroid(),
+    webSerial: WebSerialTransport.supported,
+    webUsb: WebUsbCp210xTransport.supported,
+    secureContext: typeof isSecureContext === 'undefined' ? null : isSecureContext,
+    chosen: chosen ? chosen.label : 'none',
+  };
+}
+
+// Diagnostic: ask for ANY USB device rather than just a CP210x. If the board
+// shows up here but not in the normal picker, the filter is wrong; if nothing
+// shows up at all, the cable or USB host mode is the problem.
+export async function probeAnyUsbDevice() {
+  if (!WebUsbCp210xTransport.supported) throw new Error('WebUSB unavailable');
+  const d = await navigator.usb.requestDevice({ filters: [] });
+  return {
+    vendorId: '0x' + d.vendorId.toString(16).padStart(4, '0'),
+    productId: '0x' + d.productId.toString(16).padStart(4, '0'),
+    name: [d.manufacturerName, d.productName].filter(Boolean).join(' ') || '(unnamed)',
+  };
+}
+
+// Devices this origin has already been granted, if any.
+export async function alreadyPermitted() {
+  if (!WebUsbCp210xTransport.supported) return [];
+  const list = await navigator.usb.getDevices();
+  return list.map(
+    (d) =>
+      `0x${d.vendorId.toString(16).padStart(4, '0')}:` +
+      `0x${d.productId.toString(16).padStart(4, '0')} ${d.productName || ''}`.trim()
+  );
 }
 
 function sleep(ms) {

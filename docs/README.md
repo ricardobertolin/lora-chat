@@ -78,9 +78,22 @@ no router, no server and no SIM in the path - the LoRa link is the network.
 
 ## Troubleshooting
 
+Tap **?** in the header for diagnostics: which transport was chosen, whether Web
+Serial/WebUSB exist, and a picker that lists *any* USB device the browser can
+see. If that one is empty too, the browser sees no USB device at all and the
+problem is the cable or USB host mode - not this app.
+
+### Cables
+
+A USB-C to USB-C **charger** cable often carries power and CC only, with no USB
+2.0 data pair. The board lights up and still cannot be found, because the CP2102
+needs D+/D-. Use a cable known to carry data - the one you flash the board with
+from the PC - and a USB-C OTG adapter if it is USB-A on the other end.
+
 | Symptom | Cause |
 | --- | --- |
-| No device in the picker | Something else holds the port, or the cable is charge-only |
+| Board powers on, picker empty | Charge-only cable, or the phone is not acting as USB host |
+| No device in the picker (desktop) | Something else holds the COM port |
 | Connects, no banner | Board did not reset; press its RST button |
 | Garbled text | Wrong baud - the board must be on 115200 |
 | "Web Serial and WebUSB unavailable" | Firefox or Safari; use Chrome |

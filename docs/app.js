@@ -2,7 +2,14 @@
 // speaks newline-delimited text at 115200 in both directions.
 
 import { parseLine, signalLevel } from './protocol.js';
-import { pickTransport, WebSerialTransport, WebUsbCp210xTransport } from './transport.js';
+import {
+  pickTransport,
+  describeCapabilities,
+  probeAnyUsbDevice,
+  alreadyPermitted,
+  WebSerialTransport,
+  WebUsbCp210xTransport,
+} from './transport.js';
 
 const els = {
   connect: document.getElementById('connect'),
@@ -14,6 +21,7 @@ const els = {
   form: document.getElementById('composer'),
   input: document.getElementById('input'),
   send: document.getElementById('send'),
+  diag: document.getElementById('diag'),
 };
 
 let transport = null;
@@ -181,11 +189,51 @@ els.form.addEventListener('submit', async (e) => {
   els.input.focus();
 });
 
+els.diag.addEventListener('click', async () => {
+  const caps = describeCapabilities();
+  note(
+    `diagnostics — ${caps.chosen} · Web Serial ${caps.webSerial ? 'yes' : 'no'}` +
+      ` · WebUSB ${caps.webUsb ? 'yes' : 'no'} · secure ${caps.secureContext}` +
+      ` · android ${caps.android}`
+  );
+
+  try {
+    const granted = await alreadyPermitted();
+    note(granted.length ? `already permitted: ${granted.join(', ')}` : 'no devices permitted yet');
+  } catch (err) {
+    note(`getDevices failed: ${err.message}`, true);
+  }
+
+  if (!caps.webUsb) return;
+  note('pick ANY device in the next dialog — this shows what the phone can see');
+  try {
+    const d = await probeAnyUsbDevice();
+    note(`phone sees: ${d.name} — VID ${d.vendorId}, PID ${d.productId}`);
+    if (d.vendorId !== '0x10c4') {
+      note('that is not the CP2102 (expected VID 0x10c4, PID 0xea60)', true);
+    }
+  } catch (err) {
+    if (err && err.name === 'NotFoundError') {
+      note(
+        'the picker was empty or dismissed. If empty, the phone sees no USB device ' +
+          'at all — almost always a charge-only cable, or the phone not doing USB host.',
+        true
+      );
+    } else {
+      note(`probe failed: ${err.message}`, true);
+    }
+  }
+});
+
 // Report capability up front so an unsupported browser is obvious immediately.
-if (!WebSerialTransport.supported && !WebUsbCp210xTransport.supported) {
-  note('Web Serial and WebUSB are both unavailable in this browser.', true);
-} else if (!WebSerialTransport.supported) {
-  note('Using WebUSB (Android). Plug the board in with a USB-C OTG cable.');
+const caps = describeCapabilities();
+if (!caps.webSerial && !caps.webUsb) {
+  note('Web Serial and WebUSB are both unavailable in this browser. Use Chrome.', true);
+} else {
+  note(`ready — will connect over ${caps.chosen}`);
+  if (caps.chosen === 'WebUSB') {
+    note('Plug the board in with a USB-C data cable (charge-only cables will not work).');
+  }
 }
 
 if ('serviceWorker' in navigator) {
