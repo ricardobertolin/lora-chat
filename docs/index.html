@@ -39,6 +39,11 @@
     --ming: 'MingLiU', 'PMingLiU', 'MS Song', 'SimSun', 'MS Gothic', 'DotGothic16', monospace;
   }
   * { box-sizing: border-box; }
+  /* Author styles beat the browser's own [hidden] rule, so any element given a
+     display here would ignore the attribute. Several did: the QR box, the
+     camera preview, the manual position inputs and the outbox badge were all
+     permanently visible. */
+  [hidden] { display: none !important; }
   html { background: var(--bg); }
   html, body { height: 100%; margin: 0; }
   body {
@@ -563,7 +568,7 @@
 
 <header>
   <div class="title">
-    <span>LoRa Chat <i id="ver">v0.14.0</i></span>
+    <span>LoRa Chat <i id="ver">v0.14.1</i></span>
     <small id="sub">not connected</small>
   </div>
   <div class="spacer"></div>
