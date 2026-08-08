@@ -7,7 +7,8 @@ import {
   decodePosition,
   isPosition,
   describeRelative,
-  formatAge,
+  distanceM,
+  bearingDeg,
   MAX_ACCURACY_M,
 } from './position.js';
 import { deriveKey, encryptMessage, decryptMessage, isEncrypted } from './crypto.js';
@@ -16,6 +17,9 @@ import * as survey from './survey.js';
 import * as audio from './audio.js';
 import * as frag from './fragment.js';
 import * as media from './media.js';
+import * as presence from './presence.js';
+import { drawRadar } from './radar.js';
+import { applyAccent, readAccent, normaliseHex, DEFAULT_ACCENT } from './theme.js';
 import {
   pickTransport,
   describeCapabilities,
@@ -56,6 +60,9 @@ const els = {
   encState: document.getElementById('encState'),
   histState: document.getElementById('histState'),
   histClear: document.getElementById('histClear'),
+  histKeep: document.getElementById('histKeep'),
+  accentIn: document.getElementById('accentIn'),
+  radar: document.getElementById('radar'),
   soundState: document.getElementById('soundState'),
   soundToggle: document.getElementById('soundToggle'),
   testBtn: document.getElementById('testBtn'),
@@ -97,7 +104,17 @@ const STORE_KEY = 'lora-chat-position';
 let myPos = null;      // { lat, lon, accuracy, source }
 let watchId = null;
 let shareTimer = null;
-const peers = new Map();  // node name -> { lat, lon, accuracy, at, rssi }
+
+// Presence ----------------------------------------------------------------
+// Raw LoRa has no association step - anyone on the frequency simply hears you.
+// So joining is announced, any traffic counts as a sign of life, and silence
+// past a timeout is treated as having left.
+const HELLO_INTERVAL_MS = 120000;
+const nodes = new Map();   // name -> presence node, carrying an optional position
+let helloTimer = null;
+
+const HISTORY_KEEP_KEY = 'lora-chat-keep-history';
+let keepHistory = true;
 
 // Encryption --------------------------------------------------------------
 // The passphrase is kept in localStorage so the app is usable across reloads.
@@ -210,7 +227,7 @@ function bubble({ mine, who, text, rssi, snr, locked, at, persist = true }) {
   wrap.appendChild(body);
   append(wrap);
 
-  if (persist) {
+  if (persist && keepHistory) {
     log = history.appendEntry(log, {
       mine,
       who: who || null,
@@ -226,9 +243,12 @@ function bubble({ mine, who, text, rssi, snr, locked, at, persist = true }) {
 }
 
 function renderHistoryState() {
-  els.histState.textContent = log.length
-    ? `${log.length} message${log.length === 1 ? '' : 's'} kept`
-    : 'empty';
+  els.histKeep.textContent = `Keep: ${keepHistory ? 'on' : 'off'}`;
+  els.histState.textContent = !keepHistory
+    ? 'not saving'
+    : log.length
+      ? `${log.length} message${log.length === 1 ? '' : 's'} kept`
+      : 'empty';
 }
 
 // Replays the stored conversation on load. persist:false so redrawing does not
@@ -305,6 +325,24 @@ async function handleRecv(ev) {
     locked = true;
   }
 
+  // Hearing anything is proof of presence, whatever the message turns out to be.
+  const seen = presence.touchNode(nodes, who, Date.now(), { rssi: ev.rssi, snr: ev.snr });
+  if (seen === 'joined') {
+    note(`${who} joined the channel`);
+    audio.chirpReceived();
+  } else if (seen === 'returned') {
+    note(`${who} is back`);
+  }
+  if (seen !== 'seen') renderPosition();
+
+  if (text === '!HI') return;   // the announce itself carries no other meaning
+  if (text === '!BYE') {
+    presence.dropNode(nodes, who);
+    note(`${who} left the channel`);
+    renderPosition();
+    return;
+  }
+
   // Any real message means they are there, so a call in progress is answered.
   // Probes and call control are excluded - they get explicit handling below.
   if (callTimer && !/^!(PING|PONG|CALL)/.test(text)) stopCalling(`${who} responded`);
@@ -341,7 +379,7 @@ async function handleRecv(ev) {
 
   const pos = isPosition(text) ? decodePosition(text) : null;
   if (pos) {
-    peers.set(who, { ...pos, at: Date.now(), rssi: ev.rssi });
+    presence.setPosition(nodes, who, pos, Date.now());
     const rel = describeRelative(myPos, pos);
     note(`${who} is at ${pos.lat.toFixed(5)}, ${pos.lon.toFixed(5)}` +
          (rel ? ` — ${rel} of you` : ' (set your own position to get range)'));
@@ -426,27 +464,43 @@ function renderPosition() {
   }
   els.shareBtn.textContent = `Share: ${shareTimer ? 'on' : 'off'}`;
 
+  const now = Date.now();
   els.peers.textContent = '';
-  if (!peers.size) {
-    els.peers.textContent = 'no peers yet';
-    return;
+  if (!nodes.size) {
+    els.peers.textContent = 'nobody on the channel yet';
+  } else {
+    for (const node of presence.roster(nodes)) {
+      const row = document.createElement('div');
+      row.className = 'peer' + (node.stale ? ' stale' : '');
+      const who = document.createElement('b');
+      who.textContent = node.name;
+      row.appendChild(who);
+
+      const bits = [node.stale ? 'quiet' : 'here', presence.formatSeen(node, now)];
+      if (node.rssi !== null) bits.push(`${node.rssi} dBm`);
+      const rel = node.pos ? describeRelative(myPos, node.pos) : null;
+      if (rel) bits.push(rel);
+      else if (node.pos) bits.push(`${node.pos.lat.toFixed(5)}, ${node.pos.lon.toFixed(5)}`);
+      row.appendChild(document.createTextNode(' ' + bits.join(' · ')));
+      els.peers.appendChild(row);
+    }
   }
-  for (const [name, p] of [...peers.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
-    const rel = describeRelative(myPos, p);
-    const row = document.createElement('div');
-    row.className = 'peer';
-    const who = document.createElement('b');
-    who.textContent = name;
-    row.appendChild(who);
-    row.appendChild(
-      document.createTextNode(
-        ` ${rel ?? `${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}`}` +
-          ` · +/-${Math.round(p.accuracy)} m · ${formatAge(Date.now() - p.at)}` +
-          (p.rssi !== null ? ` · ${p.rssi} dBm` : '')
-      )
-    );
-    els.peers.appendChild(row);
+  renderRadar();
+}
+
+function renderRadar() {
+  if (!els.radar || !els.radar.clientWidth) return;
+  const contacts = [];
+  for (const node of nodes.values()) {
+    if (!node.pos || !myPos) continue;
+    contacts.push({
+      name: node.name,
+      distanceM: distanceM(myPos, node.pos),
+      bearingDeg: bearingDeg(myPos, node.pos),
+      stale: node.stale,
+    });
   }
+  drawRadar(els.radar, contacts, { deviceRatio: window.devicePixelRatio || 1 });
 }
 
 function setPosition(pos) {
@@ -946,9 +1000,9 @@ function renderSurvey() {
       r.margin === null ? '-' : `${r.margin.toFixed(1)} dB — ~${r.rangeFactor.toFixed(1)}x further`
     )
   );
-  if (myPos && peers.size) {
-    const [, p] = [...peers.entries()][0];
-    els.testStats.appendChild(cell('distance', describeRelative(myPos, p) || '-'));
+  const withPos = [...nodes.values()].find((n) => n.pos);
+  if (myPos && withPos) {
+    els.testStats.appendChild(cell('distance', describeRelative(myPos, withPos.pos) || '-'));
   }
 }
 
@@ -1148,6 +1202,32 @@ els.histClear.addEventListener('click', () => {
   note('history cleared');
 });
 
+els.histKeep.addEventListener('click', () => {
+  keepHistory = !keepHistory;
+  localStorage.setItem(HISTORY_KEEP_KEY, keepHistory ? '1' : '0');
+  if (!keepHistory) {
+    // Turning it off should not leave the previous conversation on disk.
+    history.clear();
+    log = [];
+    note('history off - nothing will be saved from now on');
+  } else {
+    note('history on');
+  }
+  renderHistoryState();
+});
+
+function setAccent(hex, { persist = true } = {}) {
+  const value = applyAccent(hex, { persist });
+  els.accentIn.value = value;
+  renderRadar();
+  return value;
+}
+
+els.accentIn.addEventListener('input', (e) => setAccent(e.target.value));
+for (const sw of document.querySelectorAll('.swatch')) {
+  sw.addEventListener('click', () => setAccent(sw.dataset.accent));
+}
+
 els.setBtn.addEventListener('click', () => togglePanel(els.setPanel));
 els.posBtn.addEventListener('click', () => togglePanel(els.posPanel));
 els.useGps.addEventListener('click', startGps);
@@ -1194,10 +1274,37 @@ try {
   }
 } catch {}
 
-// Ages go stale on their own, so redraw even when nothing arrives.
+// Ages and staleness advance on their own, so redraw even when nothing arrives.
 setInterval(() => {
-  if (peers.size) renderPosition();
+  for (const name of presence.sweep(nodes, Date.now())) {
+    note(`${name} went quiet`);
+  }
+  if (nodes.size) renderPosition();
 }, 15000);
+
+// Presence announcements ---------------------------------------------------
+
+function announce(what) {
+  if (!transport) return;
+  sendText(what).catch(() => {});
+}
+
+function startPresence() {
+  announce('!HI');
+  clearInterval(helloTimer);
+  // Cheap enough to be invisible on air, often enough that a node arriving
+  // mid-session learns about everyone within a couple of minutes.
+  helloTimer = setInterval(() => announce('!HI'), HELLO_INTERVAL_MS);
+}
+
+function stopPresence(sayGoodbye) {
+  clearInterval(helloTimer);
+  helloTimer = null;
+  if (sayGoodbye) announce('!BYE');
+}
+
+// A closing tab should not look like a node that crashed.
+window.addEventListener('pagehide', () => stopPresence(true));
 
 async function connect() {
   const Transport = pickTransport();
@@ -1223,6 +1330,8 @@ async function connect() {
     });
     setConnected(true);
     note(`connected over ${Transport.label}`);
+    // Give the board a moment to finish booting before announcing ourselves.
+    setTimeout(startPresence, 3000);
   } catch (err) {
     transport = null;
     // Dismissing the browser's device picker lands here too, which is not worth
@@ -1239,6 +1348,10 @@ async function connect() {
 }
 
 async function disconnect() {
+  // Say goodbye while the radio is still ours to use.
+  stopPresence(true);
+  await new Promise((r) => setTimeout(r, 400));
+
   const t = transport;
   transport = null;
   setConnected(false);
@@ -1318,10 +1431,14 @@ if ('serviceWorker' in navigator) {
   });
 }
 
+setAccent(readAccent(), { persist: false });
+keepHistory = localStorage.getItem(HISTORY_KEEP_KEY) !== '0';
+
 setConnected(false);
 renderPosition();
 renderEncState();
 renderMeter(null);  // draw the empty segments rather than an empty box
+window.addEventListener('resize', renderRadar);
 audio.setEnabled(localStorage.getItem(SOUND_KEY) !== '0');
 renderSoundState();
 // Browsers will not make a sound until the user has interacted with the page.

@@ -34,6 +34,9 @@ rewritten in JavaScript.
 | `history.js` | Chat history persistence and capping. |
 | `survey.js` | Probe bookkeeping, delivery ratio and link-margin maths. |
 | `audio.js` | Chirps and the ring tone, synthesised with WebAudio - no assets. |
+| `presence.js` | Who is on the channel, and when they went quiet. |
+| `radar.js` | Ring scaling and the north-up projection for the radar. |
+| `theme.js` | The accent colour, shared between CSS, canvas and WebGL. |
 | `fragment.js` | Splits a blob across packets and reassembles it, with resend requests. |
 | `media.js` | Dithering, ADPCM, and the LoRa airtime formula. |
 | `backdrop.js` | The wireframe backdrop. Binds to the UI by observation, so app.js does not know it exists. |
@@ -71,6 +74,31 @@ quietly becoming a map pin.
 
 **Share** starts a 60-second broadcast. At SF9 a position costs about a third of
 a second of airtime, so it stays negligible for a handful of nodes.
+
+### Radar
+
+Below the roster, a north-up radar plots everyone whose position you have.
+Rings snap to round numbers and rescale to fit the furthest contact; a stale
+node greys out rather than disappearing.
+
+**Bearing genuinely needs GPS at both ends.** A single omnidirectional antenna
+gives a distance estimate and nothing else - direction requires a directional
+antenna or several receivers. So a peer with no position is listed in the roster
+but not plotted, rather than guessed at.
+
+## Who is on the channel
+
+Raw LoRa has no association step: anyone on the same frequency and sync word
+simply hears you. Presence is therefore inferred.
+
+- Connecting broadcasts `!HI`, and repeats it every two minutes so a node that
+  arrives mid-session learns about everyone within a couple of minutes.
+- **Any** traffic counts as a sign of life, so the announce is a backstop rather
+  than the mechanism.
+- Disconnecting broadcasts `!BYE`. Closing the tab does too, so a closed browser
+  does not look like a node that crashed.
+- Five minutes of silence marks a node **quiet**. It stays in the roster, greyed,
+  because on LoRa "gone" and "behind a hill" look identical.
 
 ## Look
 
@@ -130,11 +158,20 @@ a 40-character message goes from about 0.35 s to 0.7 s at SF9.
 
 `/commands` are never encrypted - the board would not recognise them.
 
-## History
+## History and appearance
 
 The last 300 messages are kept in `localStorage` and replayed on load, below an
-`--- earlier ---` divider. **Set -> Clear** wipes them. Only real messages are
-stored; diagnostics, positions and radio chatter are not.
+`--- earlier ---` divider. Only real messages are stored; diagnostics, positions
+and radio chatter are not.
+
+**Set -> Keep** turns saving off entirely, and clears what is already there -
+switching it off should not leave the previous conversation on disk. **Clear**
+wipes the log without changing the setting.
+
+**Set -> Accent** changes the green, either from the swatches or the colour
+picker. It reaches the CSS, the radar canvas and the WebGL backdrop, which are
+three unrelated renderers - hence `theme.js` broadcasting an event rather than
+the settings panel reaching into each of them.
 
 ## Link test
 

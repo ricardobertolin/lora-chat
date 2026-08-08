@@ -6,8 +6,11 @@
 <title>LoRa Chat</title>
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#000000">
-<link rel="icon" href="icon-192.png">
-<link rel="apple-touch-icon" href="icon-192.png">
+<!-- SVG first so the tab icon is crisp at any size. The ?v= is what actually
+     dislodges a browser's cached favicon, which it holds on to stubbornly. -->
+<link rel="icon" type="image/svg+xml" href="favicon.svg?v=2">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png?v=2">
+<link rel="apple-touch-icon" href="icon-192.png?v=2">
 <style>
   /* Vendored rather than pulled from Google Fonts: the app has to work with no
      internet, which is the whole point of LoRa. Latin subset only, 10 kB. */
@@ -28,6 +31,7 @@
     --ink: #eef0ea;
     --ink-dim: #8d918a;
     --acid: #d8ff2f;
+    --acid-lit: #eaff7a;
     --red: #ff2d2d;
     --good: #d8ff2f;
     --fair: #ffb400;
@@ -115,7 +119,7 @@
   }
   button:not(:disabled):hover { background: var(--ink); color: #000; }
   button:not(.ghost) { background: var(--acid); color: #000; }
-  button:not(.ghost):not(:disabled):hover { background: #eaff7a; }
+  button:not(.ghost):not(:disabled):hover { background: var(--acid-lit); }
   button:disabled { color: var(--line-dim); cursor: not-allowed; }
   button:focus-visible { outline: 2px solid var(--acid); outline-offset: -3px; }
 
@@ -278,6 +282,31 @@
   }
   .msg canvas, .msg audio { border: 1px solid var(--line-dim); }
 
+  .radar {
+    width: 100%;
+    max-width: 320px;
+    aspect-ratio: 1;
+    align-self: center;
+    background: #000;
+    border: 1px solid var(--line-dim);
+  }
+
+  input[type=color] {
+    width: 40px;
+    height: 32px;
+    padding: 2px;
+    background: #000;
+    border: 1px solid var(--line-dim);
+    cursor: pointer;
+  }
+  button.swatch {
+    width: 30px;
+    min-height: 30px;
+    padding: 0;
+    border: 1px solid var(--line-dim);
+  }
+  button.swatch:hover { border-color: var(--ink); }
+
   select {
     font-family: var(--ming);
     font-size: 13px;
@@ -346,6 +375,8 @@
   .peers { display: flex; flex-direction: column; gap: 5px; }
   .peer { overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
   .peer b { font-weight: normal; color: var(--acid); }
+  .peer.stale { color: var(--line-dim); }
+  .peer.stale b { color: var(--ink-dim); }
   .stats {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
@@ -468,6 +499,7 @@
     <button id="mSave" class="sm">Save</button>
   </div>
   <div class="peers" id="peers">no peers yet</div>
+  <canvas id="radar" class="radar"></canvas>
 </div>
 
 <div id="testPanel">
@@ -538,7 +570,17 @@
   <div class="prow">
     <strong>History</strong>
     <span id="histState" class="muted"></span>
+    <button id="histKeep" class="ghost sm">Keep: on</button>
     <button id="histClear" class="ghost sm">Clear</button>
+  </div>
+  <div class="prow">
+    <strong>Accent</strong>
+    <input type="color" id="accentIn" value="#d8ff2f" title="Accent colour">
+    <button class="ghost sm swatch" data-accent="#d8ff2f" style="background:#d8ff2f"></button>
+    <button class="ghost sm swatch" data-accent="#ffb400" style="background:#ffb400"></button>
+    <button class="ghost sm swatch" data-accent="#00e5ff" style="background:#00e5ff"></button>
+    <button class="ghost sm swatch" data-accent="#ff4fd8" style="background:#ff4fd8"></button>
+    <button class="ghost sm swatch" data-accent="#eef0ea" style="background:#eef0ea"></button>
   </div>
   <div class="prow">
     <button id="diag" class="ghost sm">USB diagnostics</button>

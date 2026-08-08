@@ -10,6 +10,7 @@
 // hidden rather than rendering forever in your pocket.
 
 import * as THREE from './vendor/three.module.min.js';
+import { readAccent, hexToInt } from './theme.js';
 
 const canvas = document.getElementById('bg3d');
 if (canvas) start(canvas);
@@ -30,7 +31,8 @@ function start(canvas) {
   const group = new THREE.Group();
   scene.add(group);
 
-  const shellMat = new THREE.LineBasicMaterial({ color: 0xd8ff2f, transparent: true, opacity: 0.5 });
+  const accent = hexToInt(readAccent());
+  const shellMat = new THREE.LineBasicMaterial({ color: accent, transparent: true, opacity: 0.5 });
   const coreMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55 });
   const ringMat = new THREE.LineBasicMaterial({ color: 0xff2d2d, transparent: true, opacity: 0.22 });
 
@@ -58,10 +60,8 @@ function start(canvas) {
   }
 
   // Expanding shockwave, fired on each incoming packet.
-  const wave = new THREE.LineLoop(
-    circle(1),
-    new THREE.LineBasicMaterial({ color: 0xd8ff2f, transparent: true, opacity: 0 })
-  );
+  const waveMat = new THREE.LineBasicMaterial({ color: accent, transparent: true, opacity: 0 });
+  const wave = new THREE.LineLoop(circle(1), waveMat);
   wave.rotation.x = Math.PI / 2.2;
   group.add(wave);
 
@@ -138,6 +138,13 @@ function start(canvas) {
   // A backdrop is not worth spending battery on while the screen is off or the
   // app is in the background - which is most of a range walk.
   document.addEventListener('visibilitychange', () => (document.hidden ? stop() : play()));
+
+  document.addEventListener('accentchange', (e) => {
+    const c = hexToInt(e.detail.hex);
+    shellMat.color.setHex(c);
+    waveMat.color.setHex(c);
+    if (still) renderer.render(scene, cam);   // static mode needs a redraw
+  });
 
   if (still) renderer.render(scene, cam);
   else play();
