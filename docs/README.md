@@ -260,6 +260,11 @@ there are no surprises about what arrived.
 **Drop to `/sf 7` before sending media.** It is roughly four times faster than
 SF9 and you almost certainly do not need SF12's range for this.
 
+Progress appears in its own strip under the header, with a fill bar and a Cancel
+button - **not** in the chat log. A thirty-fragment image reporting each step
+would bury the conversation it is part of. The log gets one line when a transfer
+starts and one when it finishes or fails; everything between goes to the strip.
+
 ### How it works
 
 Blobs are split into `!B<id>.<seq>.<total>.<kind><enc> <chunk>` lines of at most

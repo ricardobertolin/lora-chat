@@ -89,6 +89,10 @@ const els = {
   recBtn: document.getElementById('recBtn'),
   imgWidth: document.getElementById('imgWidth'),
   audRate: document.getElementById('audRate'),
+  xfer: document.getElementById('xfer'),
+  xferFill: document.getElementById('xferFill'),
+  xferText: document.getElementById('xferText'),
+  xferCancel: document.getElementById('xferCancel'),
 };
 
 let transport = null;
@@ -397,8 +401,10 @@ async function handleSent(ev) {
 
   // The echo of a fragment is our flow control: the board only prints it once
   // the packet is actually on the air, so this is when the next one may go.
+  // The end marker and resend requests echo through here too, and must not
+  // advance the queue.
   if (text.startsWith(frag.FRAG_PREFIX)) {
-    if (outgoing) pumpTransfer();
+    if (outgoing && outgoing.phase === 'sending' && frag.parseFragment(text)) pumpTransfer();
     return;
   }
 
@@ -597,18 +603,25 @@ function pumpTransfer() {
   clearTimeout(outgoing.timer);
 
   if (!outgoing.queue.length) {
-    sendRaw(frag.endLine(outgoing.id)).catch(() => {});
-    note(`sent ${outgoing.lines.length} fragments, waiting for the other end`);
+    // Send the end marker once. Its own echo comes back through handleSent, and
+    // without the phase guard that would queue another one indefinitely.
+    if (outgoing.phase !== 'waiting') {
+      outgoing.phase = 'waiting';
+      outgoing.sent = outgoing.lines.length;
+      sendRaw(frag.endLine(outgoing.id)).catch(() => {});
+    }
+    renderXfer();
     outgoing.timer = setTimeout(() => endTransfer('transfer finished'), 30000);
     return;
   }
 
+  outgoing.phase = 'sending';
   const seq = outgoing.queue.shift();
-  const done = outgoing.lines.length - outgoing.queue.length;
-  els.mediaState.textContent = `sending ${done}/${outgoing.lines.length}`;
+  outgoing.sent = outgoing.lines.length - outgoing.queue.length;
+  renderXfer();
   sendRaw(outgoing.lines[seq]).catch((err) => {
-    note(`transfer failed: ${err.message}`, true);
     endTransfer(null);
+    note(`transfer failed: ${err.message}`, true);
   });
   outgoing.timer = setTimeout(pumpTransfer, FRAG_ECHO_TIMEOUT_MS);
 }
@@ -617,7 +630,7 @@ function endTransfer(reason) {
   if (!outgoing) return;
   clearTimeout(outgoing.timer);
   outgoing = null;
-  els.mediaState.textContent = 'idle';
+  renderXfer();
   if (reason) note(reason);
 }
 
@@ -650,19 +663,58 @@ async function sendBlob(bytes, kind, label) {
 
   const id = frag.makeId();
   const lines = frag.packFragments({ id, kind, encrypted, payload });
-  outgoing = { id, kind, lines, queue: lines.map((_, i) => i), timer: null, rounds: 0 };
+  outgoing = {
+    id, kind, lines, queue: lines.map((_, i) => i),
+    timer: null, rounds: 0, phase: 'sending', sent: 0,
+  };
+  // One line in the log for the whole transfer; the rest goes to the bar.
   note(`sending ${label}: ${lines.length} fragments, ~${media.formatDuration(est.ms)}`);
   pumpTransfer();
 }
 
-function assemblyProgress(asm) {
-  els.mediaState.textContent =
-    `receiving ${frag.receivedCount(asm)}/${asm.total}`;
+// Transfer progress lives in its own bar rather than the log. A 30-fragment
+// image would otherwise bury the conversation under its own progress reports.
+function renderXfer() {
+  let label = null;
+  let done = 0;
+  let total = 0;
+
+  if (outgoing) {
+    const what = outgoing.kind === 'i' ? 'image' : 'audio';
+    total = outgoing.lines.length;
+    done = outgoing.sent || 0;
+    label = outgoing.phase === 'waiting'
+      ? `sending ${what} - waiting for the other end`
+      : `sending ${what} ${done}/${total}`;
+  } else {
+    // Show whichever inbound transfer moved most recently.
+    let newest = null;
+    for (const asm of assemblies.values()) {
+      if (!newest || asm.updatedAt > newest.updatedAt) newest = asm;
+    }
+    if (newest) {
+      const what = newest.kind === 'i' ? 'image' : 'audio';
+      done = frag.receivedCount(newest);
+      total = newest.total;
+      label = `receiving ${what} from ${newest.who || 'peer'} ${done}/${total}`;
+    }
+  }
+
+  if (!label) {
+    els.xfer.classList.remove('show');
+    els.mediaState.textContent = 'idle';
+    return;
+  }
+  els.xfer.classList.add('show');
+  els.xferText.textContent = label;
+  els.xferFill.style.width = total ? `${Math.round((done / total) * 100)}%` : '0%';
+  els.xferCancel.hidden = !outgoing;
+  els.mediaState.textContent = label;
 }
 
 async function finishAssembly(asm, who, rssi, snr) {
   assemblies.delete(asm.id);
-  els.mediaState.textContent = 'idle';
+  renderXfer();
 
   let payload = frag.assembled(asm);
   if (asm.encrypted) {
@@ -786,10 +838,11 @@ function handleFragmentLine(text, who, rssi, snr) {
       assemblies.set(f.id, asm);
       note(`${who} is sending ${f.kind === 'i' ? 'an image' : 'audio'} (${f.total} fragments)`);
     }
-    if (frag.addFragment(asm, f)) assemblyProgress(asm);
     asm.rssi = rssi;
     asm.snr = snr;
     asm.who = who;
+    frag.addFragment(asm, f);
+    renderXfer();
     if (frag.isComplete(asm)) finishAssembly(asm, who, rssi, snr);
     return true;
   }
@@ -806,11 +859,11 @@ function handleFragmentLine(text, who, rssi, snr) {
     asm.rounds = (asm.rounds || 0) + 1;
     if (asm.rounds > MAX_RESEND_ROUNDS) {
       assemblies.delete(endId);
-      els.mediaState.textContent = 'idle';
+      renderXfer();
       note(`gave up on media from ${who}: ${missing.length} fragments never arrived`, true);
       return true;
     }
-    note(`asking ${who} to resend ${missing.length} fragments`);
+    els.xferText.textContent = `asking ${who} to resend ${missing.length} fragments`;
     for (const batch of frag.splitRequest(endId, missing)) {
       sendRaw(frag.requestLine(endId, batch)).catch(() => {});
     }
@@ -821,8 +874,8 @@ function handleFragmentLine(text, who, rssi, snr) {
   if (req) {
     if (!outgoing || outgoing.id !== req.id) return true;
     const valid = req.missing.filter((s) => s >= 0 && s < outgoing.lines.length);
-    note(`resending ${valid.length} fragments`);
     outgoing.queue.push(...valid);
+    outgoing.phase = 'sending';
     clearTimeout(outgoing.timer);
     pumpTransfer();
     return true;
@@ -833,14 +886,18 @@ function handleFragmentLine(text, who, rssi, snr) {
 // Drop inbound transfers that stalled, so a half-received image does not sit
 // in memory forever waiting for fragments that are never coming.
 setInterval(() => {
+  let dropped = false;
   for (const [id, asm] of assemblies) {
     if (Date.now() - asm.updatedAt > ASSEMBLY_IDLE_MS) {
       assemblies.delete(id);
       note(`abandoned an incomplete transfer from ${asm.who || 'peer'}`, true);
-      els.mediaState.textContent = 'idle';
+      dropped = true;
     }
   }
+  if (dropped) renderXfer();
 }, 15000);
+
+els.xferCancel.addEventListener('click', () => endTransfer('transfer cancelled'));
 
 // Capture -----------------------------------------------------------------
 

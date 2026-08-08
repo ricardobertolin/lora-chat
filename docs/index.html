@@ -239,6 +239,37 @@
   }
   #banner.show { display: block; }
 
+  /* ===== transfer progress =====
+     Its own strip rather than the log: a thirty-fragment image would otherwise
+     bury the conversation under its own progress reports. */
+  #xfer {
+    display: none;
+    position: relative;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 14px;
+    background: var(--panel-2);
+    border-bottom: 1px solid var(--line-dim);
+    font-size: 12px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--ink);
+    flex: 0 0 auto;
+    overflow: hidden;
+  }
+  #xfer.show { display: flex; }
+  #xferFill {
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 0;
+    background: var(--acid);
+    opacity: .18;
+    transition: width .25s ease-out;
+    pointer-events: none;
+  }
+  #xferText { position: relative; flex: 1; overflow-wrap: anywhere; }
+  #xferCancel { position: relative; }
+
   /* ===== incoming call ===== */
   #callBanner {
     display: none;
@@ -478,6 +509,12 @@
   <span id="callText">Incoming call</span>
   <button id="answerBtn" class="sm">Answer</button>
   <button id="dismissBtn" class="ghost sm">Dismiss</button>
+</div>
+
+<div id="xfer">
+  <div id="xferFill"></div>
+  <span id="xferText">transfer</span>
+  <button id="xferCancel" class="ghost sm">Cancel</button>
 </div>
 
 <div id="banner"></div>
