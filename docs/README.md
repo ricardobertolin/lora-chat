@@ -29,10 +29,40 @@ rewritten in JavaScript.
 | `app.js` | UI wiring. |
 | `protocol.js` | Parses the firmware's serial lines. No browser APIs, so it is unit-testable. |
 | `transport.js` | Web Serial and WebUSB/CP210x implementations behind one interface. |
+| `position.js` | Position encoding and great-circle maths. Also browser-free and unit-tested. |
 | `sw.js`, `manifest.webmanifest` | PWA shell, so it installs and runs offline. |
 | `serve.py` | Local dev server on localhost. |
 | `make_icons.py` | Regenerates the PNG icons. Stdlib only. |
-| `test/` | `npm test`, or `node --test test/` |
+| `test/` | `npm test` (26 tests) |
+
+## Position sharing
+
+Tap **Pos**. A position is sent as an ordinary chat message with a marker:
+
+```
+!POS -23.550520 -46.633309 12
+```
+
+so the **firmware needs no changes** - the board relays it like any other text,
+and the receiving app renders a peer update instead of a chat bubble. Peers are
+listed with distance and compass bearing from wherever you are.
+
+Two sources, because they suit different machines:
+
+| Source | For | Notes |
+| --- | --- | --- |
+| **Use GPS** | Phones | Real GNSS, works with no internet. Fixes worse than 100 m are rejected. |
+| **Set manually** | Desktops, fixed nodes | Type the coordinates once; stored in `localStorage` and restored on reload. |
+
+**Desktop geolocation is deliberately not trusted.** A PC has no GNSS, so the
+browser falls back to WiFi or IP lookup - kilometres out, and it needs internet,
+which is exactly what you will not have where LoRa is useful. A base station
+does not move, so typing its coordinates is both more accurate and always
+available. The 100 m accuracy gate is what stops an IP-derived guess from
+quietly becoming a map pin.
+
+**Share** starts a 60-second broadcast. At SF9 a position costs about a third of
+a second of airtime, so it stays negligible for a handful of nodes.
 
 ## Desktop
 

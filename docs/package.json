@@ -4,6 +4,7 @@
   "type": "module",
   "description": "Browser client for the lora_chat firmware. Only used so node treats the .js files as ES modules when running tests; the app itself needs no build step and no dependencies.",
   "scripts": {
-    "test": "node --test test/"
+    "_comment": "A glob, not a directory: `node --test test/` resolves the path as a module on Windows and fails.",
+    "test": "node --test \"test/*.test.mjs\""
   }
 }

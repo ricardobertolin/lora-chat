@@ -194,6 +194,46 @@
     display: none;
   }
   #banner.show { display: block; }
+
+  #posPanel {
+    display: none;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px 14px;
+    background: var(--panel-2);
+    border-bottom: 1px solid var(--line);
+    font-size: 13px;
+    flex: 0 0 auto;
+  }
+  #posPanel.show { display: flex; }
+  .prow {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .prow input[type=text] {
+    flex: 1 1 120px;
+    font-size: 16px;
+    padding: 7px 10px;
+  }
+  button.sm {
+    font-size: 13px;
+    padding: 6px 10px;
+    min-height: 34px;
+  }
+  .muted { color: var(--muted); }
+  .peers {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    color: var(--muted);
+  }
+  .peer {
+    font-variant-numeric: tabular-nums;
+    overflow-wrap: anywhere;
+  }
+  .peer b { color: var(--text); }
 </style>
 </head>
 <body>
@@ -205,11 +245,31 @@
   </div>
   <div class="spacer"></div>
   <span class="pill" id="status"><span class="dot"></span><span id="statusText">offline</span></span>
+  <button id="posBtn" class="ghost" title="Position sharing">Pos</button>
   <button id="diag" class="ghost" title="Show what USB devices this browser can see">?</button>
   <button id="connect">Connect</button>
 </header>
 
 <div id="banner"></div>
+
+<div id="posPanel">
+  <div class="prow">
+    <strong>My position</strong>
+    <span id="myPos" class="muted">off</span>
+  </div>
+  <div class="prow">
+    <button id="useGps" class="ghost sm">Use GPS</button>
+    <button id="manualBtn" class="ghost sm">Set manually</button>
+    <button id="shareBtn" class="ghost sm">Share: off</button>
+    <button id="posClear" class="ghost sm">Clear</button>
+  </div>
+  <div class="prow" id="manualRow" hidden>
+    <input type="text" id="mLat" placeholder="latitude" inputmode="decimal" autocomplete="off">
+    <input type="text" id="mLon" placeholder="longitude" inputmode="decimal" autocomplete="off">
+    <button id="mSave" class="sm">Save</button>
+  </div>
+  <div class="peers" id="peers">no peers yet</div>
+</div>
 
 <div id="log" role="log" aria-live="polite"></div>
 
